@@ -1,0 +1,15 @@
+{
+  "$schema": "https://schema.tauri.app/config/2.0.0",
+  "identifier": "default",
+  "description": "Evolve Messenger: only the messenger page may call the app's own commands",
+  "windows": ["main"],
+  "remote": {
+    "urls": [
+      "https://messager.evolvepreneuriq.app/*"
+    ]
+  },
+  "permissions": [
+    "allow-report-unread",
+    "allow-open-external-url"
+  ]
+}

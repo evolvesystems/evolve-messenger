@@ -1,0 +1,55 @@
+{
+  "$schema": "https://schema.tauri.app/config/2.0.0",
+  "productName": "Evolve Messenger",
+  "version": "1.0.0",
+  "identifier": "com.evolveapp.messenger",
+  "build": {
+    "frontendDist": "../dist"
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "createUpdaterArtifacts": true,
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.png",
+      "icons/icon.ico",
+      "icons/icon.icns"
+    ],
+    "windows": {
+      "certificateThumbprint": null,
+      "digestAlgorithm": "sha256",
+      "timestampUrl": ""
+    },
+    "linux": {
+      "deb": {
+        "depends": [
+          "libwebkit2gtk-4.1-0",
+          "libgtk-3-0"
+        ]
+      }
+    },
+    "macOS": {
+      "entitlements": "Entitlements.plist",
+      "frameworks": [],
+      "signingIdentity": null,
+      "minimumSystemVersion": "10.15"
+    }
+  },
+  "app": {
+    "windows": [],
+    "security": {
+      "csp": null
+    }
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://evolvepreneuriq.app/api/v1/desktop/apps/messenger/updates/{{target}}/{{current_version}}"
+      ],
+      "pubkey": "REPLACE_WITH_MESSENGER_UPDATER_PUBLIC_KEY"
+    }
+  }
+}
