@@ -1,0 +1,185 @@
+# Evolve Messenger: build, test and (only when asked) publish a release.
+# Written by EIQ (/admin/app-releases, Setup). Dispatch only: nothing runs on a push or a tag. Publish defaults to false.
+# Secrets used (set by EIQ, never shown): TAURI_SIGNING_PRIVATE_KEY, TAURI_SIGNING_PRIVATE_KEY_PASSWORD; optional APPLE_* for a signed Mac app.
+name: Build Evolve Messenger
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version, e.g. 1.0.0 (must equal tauri.conf.json and Cargo.toml)'
+        required: true
+        type: string
+      platforms:
+        description: 'Platforms to build, comma-separated: windows,macos,linux'
+        required: true
+        default: 'windows,macos,linux'
+        type: string
+      publish:
+        description: 'Publish a public GitHub release? Leave false to only build and test (installers are attached to the run)'
+        required: true
+        default: 'false'
+        type: choice
+        options: ['false', 'true']
+      release_notes:
+        description: 'Release notes (only used when publish is true)'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Version must match in the input, tauri.conf.json and Cargo.toml
+        shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          CONF=$(jq -r '.version' src-tauri/tauri.conf.json)
+          CARGO=$(grep -m1 '^version' src-tauri/Cargo.toml | sed -E 's/version *= *"([^"]+)"/\1/')
+          echo "input=$INPUT_VERSION tauri.conf.json=$CONF Cargo.toml=$CARGO"
+          [[ "$INPUT_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "version must look like 1.2.3"; exit 1; }
+          [ "$INPUT_VERSION" = "$CONF" ] && [ "$INPUT_VERSION" = "$CARGO" ] || { echo "versions differ"; exit 1; }
+
+  build:
+    name: Build ${{ matrix.name }}
+    needs: validate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: linux,   os: ubuntu-22.04,   target: x86_64-unknown-linux-gnu }
+          - { name: windows, os: windows-latest, target: x86_64-pc-windows-msvc }
+          - { name: macos,   os: macos-latest,   target: universal-apple-darwin }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Is this platform requested?
+        id: want
+        shell: bash
+        env:
+          PLATFORMS: ${{ inputs.platforms }}
+        run: |
+          if echo ",$PLATFORMS," | tr -d ' ' | grep -q ",${{ matrix.name }},"; then echo "build=true" >> "$GITHUB_OUTPUT"; else echo "build=false" >> "$GITHUB_OUTPUT"; fi
+
+      - uses: actions/checkout@v5
+        if: steps.want.outputs.build == 'true'
+      - uses: actions/setup-node@v5
+        if: steps.want.outputs.build == 'true'
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.want.outputs.build == 'true'
+        with:
+          targets: ${{ matrix.target == 'universal-apple-darwin' && 'aarch64-apple-darwin,x86_64-apple-darwin' || matrix.target }}
+
+      - name: Linux libraries
+        if: steps.want.outputs.build == 'true' && matrix.name == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Install JS dependencies
+        if: steps.want.outputs.build == 'true'
+        run: npm ci
+
+      - name: Make the app icons from app-icon.png (when the file exists)
+        if: steps.want.outputs.build == 'true' && hashFiles('app-icon.png') != ''
+        run: npx tauri icon app-icon.png
+
+      - name: cargo check
+        if: steps.want.outputs.build == 'true'
+        working-directory: src-tauri
+        run: cargo check
+
+      - name: cargo test
+        if: steps.want.outputs.build == 'true'
+        working-directory: src-tauri
+        run: cargo test
+
+      - name: No placeholder icon when publishing
+        if: steps.want.outputs.build == 'true' && inputs.publish == 'true'
+        shell: bash
+        run: |
+          if [ -f app-icon.PLACEHOLDER.txt ]; then
+            echo "The app icon is a TEMPORARY placeholder. Upload the real icon in EIQ (Desktop App, Setup) before publishing."
+            exit 1
+          fi
+
+      - name: release_ready (only when publishing)
+        # Refuses to publish while the updater public key is still the placeholder (tests/release_ready.rs, ignored in normal runs).
+        if: steps.want.outputs.build == 'true' && inputs.publish == 'true'
+        working-directory: src-tauri
+        run: cargo test --test release_ready -- --include-ignored
+
+      - name: Build installers
+        if: steps.want.outputs.build == 'true'
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # macOS signing and notarisation: Tauri reads these; empty values mean ad-hoc signing
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: npx tauri build --target ${{ matrix.target }}
+
+      - name: Attach installers to this run
+        if: steps.want.outputs.build == 'true'
+        uses: actions/upload-artifact@v5
+        with:
+          name: ${{ matrix.name }}
+          retention-days: 14
+          if-no-files-found: error
+          path: |
+            src-tauri/target/${{ matrix.target }}/release/bundle/**/*.exe
+            src-tauri/target/${{ matrix.target }}/release/bundle/**/*.msi
+            src-tauri/target/${{ matrix.target }}/release/bundle/**/*.dmg
+            src-tauri/target/${{ matrix.target }}/release/bundle/**/*.app.tar.gz
+            src-tauri/target/${{ matrix.target }}/release/bundle/**/*.AppImage
+            src-tauri/target/${{ matrix.target }}/release/bundle/**/*.deb
+            src-tauri/target/${{ matrix.target }}/release/bundle/**/*.rpm
+            src-tauri/target/${{ matrix.target }}/release/bundle/**/*.sig
+
+  release:
+    name: Publish release
+    needs: [validate, build]
+    # Runs only when asked: publish=true AND every requested build passed.
+    if: ${{ inputs.publish == 'true' && !failure() && !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          path: artifacts
+      - name: List what will be published
+        run: ls -R artifacts
+      - name: Create the release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ inputs.version }}
+          name: Evolve Messenger ${{ inputs.version }}
+          body: ${{ inputs.release_notes || 'Evolve Messenger build' }}
+          draft: false
+          prerelease: false
+          files: |
+            artifacts/**/*.exe
+            artifacts/**/*.msi
+            artifacts/**/*.dmg
+            artifacts/**/*.app.tar.gz
+            artifacts/**/*.AppImage
+            artifacts/**/*.deb
+            artifacts/**/*.rpm
+            artifacts/**/*.sig
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
