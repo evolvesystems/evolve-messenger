@@ -131,7 +131,13 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: npx tauri build --target ${{ matrix.target }}
+        run: |
+          # An unset secret reaches the build as an EMPTY variable, and Tauri then tries to import an empty certificate and fails the Mac build.
+          # Without a certificate secret, drop all Apple variables so the Mac app is signed ad-hoc instead.
+          if [ -z "$APPLE_CERTIFICATE" ]; then
+            unset APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID
+          fi
+          npx tauri build --target ${{ matrix.target }}
 
       - name: Attach installers to this run
         if: steps.want.outputs.build == 'true'
