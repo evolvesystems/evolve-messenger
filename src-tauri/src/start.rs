@@ -12,6 +12,17 @@ pub fn start_url() -> String {
     format!("https://{APP_HOST}{START_PATH}")
 }
 
+/// The window's User-Agent: a normal browser string for the platform with " EvolveMessenger/<version>" appended, so the site still sees an ordinary Chrome or WebKit and the
+/// desktop chat page can recognise the app by the suffix (UI Sweep, commit 6db4382ebc). The base is fixed per platform because the webview's own default cannot be read before the window exists.
+pub fn user_agent(os: &str, version: &str) -> String {
+    let base = match os {
+        "windows" => "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0",
+        "macos" => "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+        _ => "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+    };
+    format!("{base} EvolveMessenger/{version}")
+}
+
 /// A start path is an absolute path on the host: no scheme, no host, no whitespace, no query or fragment, no `..`.
 pub fn is_valid_path(p: &str) -> bool {
     p.starts_with('/') && !p.starts_with("//") && p.len() <= 200 && !p.contains("..") && !p.contains('?') && !p.contains('#') && !p.chars().any(|c| c.is_whitespace() || c.is_control() || c == '\\')
@@ -25,6 +36,18 @@ mod tests {
     fn the_start_url_is_https_on_the_main_host_and_the_path_is_valid() {
         assert!(start_url().starts_with("https://evolvepreneuriq.app/"));
         assert!(is_valid_path(START_PATH));
+    }
+
+    #[test]
+    fn the_user_agent_is_a_normal_browser_with_the_app_suffix_appended() {
+        for os in ["windows", "macos", "linux", "freebsd"] {
+            let ua = user_agent(os, "1.0.1");
+            assert!(ua.starts_with("Mozilla/5.0 ("), "{os}: {ua}");
+            assert!(ua.contains("AppleWebKit/"), "{os}");
+            assert!(ua.ends_with(" EvolveMessenger/1.0.1"), "{os}: the suffix comes last");
+        }
+        assert!(user_agent("windows", "1.0.1").contains("Chrome/"));
+        assert!(user_agent("macos", "2.0.0").ends_with("EvolveMessenger/2.0.0"));
     }
 
     #[test]

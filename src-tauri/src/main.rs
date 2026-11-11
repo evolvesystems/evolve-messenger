@@ -257,7 +257,7 @@ fn main() {
                     }
                     _ => true,
                 })
-                .user_agent(&format!("EvolveMessenger/{} Tauri/2", env!("CARGO_PKG_VERSION")))
+                .user_agent(&start::user_agent(std::env::consts::OS, env!("CARGO_PKG_VERSION")))
                 .visible(!hidden)
                 .on_page_load(|webview, payload| {
                     let u = payload.url();

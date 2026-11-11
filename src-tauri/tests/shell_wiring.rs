@@ -30,6 +30,13 @@ fn the_host_in_the_page_scripts_comes_from_the_one_constant() {
 }
 
 #[test]
+fn the_window_user_agent_is_a_browser_string_with_the_app_suffix() {
+    let src = main_rs();
+    assert!(src.contains(".user_agent(&start::user_agent(std::env::consts::OS, env!(\"CARGO_PKG_VERSION\")))"));
+    assert!(!src.contains("Tauri/2"), "the old replacement agent is gone");
+}
+
+#[test]
 fn links_to_other_pages_of_the_site_open_in_the_system_browser_not_in_the_chat_window() {
     let src = main_rs();
     assert!(src.contains("var internal = u.hostname === '__HOST__' && /^\\/(__PATHS__)([\\/?#]|$)/.test(u.pathname);"));
