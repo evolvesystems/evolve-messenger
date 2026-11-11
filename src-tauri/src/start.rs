@@ -7,10 +7,17 @@
 // 1.0.2 (task 5828, John 11 Nov): the app loads the PHONE Messenger host with MOBILE APPS' two-column layout. On that host the bare root is the app's own entry (the host router sends / to the app shell).
 pub const APP_HOST: &str = "messager.evolvepreneuriq.app";
 pub const START_PATH: &str = "/";
+/// The screen the app opens (MOBILE APPS, 11 Nov): Team Chat. Plain "/" signed in lands on the Inbox. A fixed query, validated like the path.
+pub const START_QUERY: &str = "screen=team-chat";
 pub const CONFIRMED: bool = true;
 
 pub fn start_url() -> String {
-    format!("https://{APP_HOST}{START_PATH}")
+    format!("https://{APP_HOST}{START_PATH}?{START_QUERY}")
+}
+
+/// A start query is plain `name=value` pairs joined by `&`: letters, digits, `-`, `_`, `=`, `&` only.
+pub fn is_valid_query(q: &str) -> bool {
+    !q.is_empty() && q.len() <= 100 && q.chars().all(|c| c.is_ascii_alphanumeric() || "-_=&".contains(c))
 }
 
 /// The window's User-Agent: a normal browser string for the platform with " EvolveMessenger/<version>" appended, so the site still sees an ordinary Chrome or WebKit and the
@@ -37,6 +44,16 @@ mod tests {
     fn the_start_url_is_https_on_the_main_host_and_the_path_is_valid() {
         assert!(start_url().starts_with("https://messager.evolvepreneuriq.app/"));
         assert!(is_valid_path(START_PATH));
+        assert!(is_valid_query(START_QUERY));
+        assert_eq!(start_url(), "https://messager.evolvepreneuriq.app/?screen=team-chat");
+    }
+
+    #[test]
+    fn bad_queries_are_refused() {
+        for bad in ["", "a=b c", "a=b#c", "a=<b>", "a=b?c", "javascript:x", "a=b\n"] {
+            assert!(!is_valid_query(bad), "{bad:?}");
+        }
+        assert!(!is_valid_query(&"a".repeat(101)));
     }
 
     #[test]
