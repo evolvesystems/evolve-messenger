@@ -224,11 +224,11 @@ const UNREAD_POLL_JS: &str = r#"
 (async function() {
     if (!window.__TAURI_INTERNALS__ || location.hostname !== '__HOST__') return;
     try {
-        var r = await fetch('/api/v1/desktop/check-notifications', {credentials: 'include'});
-        if (r.status === 401) { window.__TAURI_INTERNALS__.invoke('report_signed_out'); return; }
+        var r = await fetch('/messenger/api/badge', {credentials: 'include'});
+        if (r.status === 401 || r.status === 403) { window.__TAURI_INTERNALS__.invoke('report_signed_out'); return; }
         if (r.ok) {
             var d = await r.json();
-            window.__TAURI_INTERNALS__.invoke('report_unread', {count: parseInt(d.unread_chats, 10) || 0});
+            window.__TAURI_INTERNALS__.invoke('report_unread', {count: parseInt(d.total, 10) || 0});
         }
     } catch (e) {}
 })();
@@ -284,7 +284,7 @@ fn main() {
             let window = WebviewWindowBuilder::new(app, WINDOW, WebviewUrl::External(url))
                 .title("Evolve Messenger")
                 .inner_size(1100.0, 760.0)
-                .min_inner_size(800.0, 520.0)
+                .min_inner_size(1024.0, 600.0)
                 .on_navigation(|url| guard::is_navigation_allowed(url.scheme(), url.host_str()))
                 .on_download(|webview, event| match event {
                     // Attachments go straight to the Downloads folder under a safe name (the desktop chat page offers file downloads).

@@ -4,10 +4,10 @@
 //! RELEASE SAFETY: START_PATH is a placeholder until the page is live and its path is confirmed. `CONFIRMED` flips to true in the same commit that sets the real path;
 //! tests/release_ready.rs (run when Publish is on) refuses to publish while it is false.
 
-// 1.0.2 (task 5828, John 11 Nov): the app loads the PHONE Messenger host with MOBILE APPS' two-column layout. The path is a placeholder until MOBILE APPS names it.
+// 1.0.2 (task 5828, John 11 Nov): the app loads the PHONE Messenger host with MOBILE APPS' two-column layout. On that host the bare root is the app's own entry (the host router sends / to the app shell).
 pub const APP_HOST: &str = "messager.evolvepreneuriq.app";
 pub const START_PATH: &str = "/";
-pub const CONFIRMED: bool = false;
+pub const CONFIRMED: bool = true;
 
 pub fn start_url() -> String {
     format!("https://{APP_HOST}{START_PATH}")

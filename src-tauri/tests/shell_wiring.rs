@@ -45,7 +45,7 @@ fn links_to_other_pages_of_the_site_open_in_the_system_browser_not_in_the_chat_w
 #[test]
 fn the_window_is_desktop_sized_stays_on_its_host_and_saves_downloads_safely() {
     let src = main_rs();
-    assert!(src.contains(".inner_size(1100.0, 760.0)") && src.contains(".min_inner_size(800.0, 520.0)"));
+    assert!(src.contains(".inner_size(1100.0, 760.0)") && src.contains(".min_inner_size(1024.0, 600.0)"), "the two-column layout starts at 900 px, the window never gets narrower than 1024");
     assert!(src.contains(".on_navigation(|url| guard::is_navigation_allowed(url.scheme(), url.host_str()))"));
     let d = src.find(".on_download(").expect("download handler");
     let body = &src[d..d + 900];
@@ -57,7 +57,7 @@ fn the_window_is_desktop_sized_stays_on_its_host_and_saves_downloads_safely() {
 #[test]
 fn a_401_pauses_the_timer_and_a_count_resumes_it() {
     let src = main_rs();
-    assert!(src.contains("if (r.status === 401) { window.__TAURI_INTERNALS__.invoke('report_signed_out'); return; }"));
+    assert!(src.contains("if (r.status === 401 || r.status === 403) { window.__TAURI_INTERNALS__.invoke('report_signed_out'); return; }"));
     let c = src.find("async fn report_signed_out").unwrap();
     assert!(src[c..c + 300].contains("from_app(&webview)"), "origin guard");
     let t = src.find("if SIGNED_OUT.load(").expect("timer checks the flag");
@@ -114,4 +114,19 @@ fn the_updated_to_marker_is_written_before_the_restart_and_shown_once() {
     assert!(m < r, "marker before restart");
     assert!(src.contains("std::fs::remove_file(&p)"), "the marker is deleted after it is read");
     assert!(src.contains("quiet::version_from_marker(&text)"), "only a plain version number is shown");
+}
+
+#[test]
+fn the_unread_number_comes_from_the_messenger_badge_endpoint_total() {
+    let src = main_rs();
+    assert!(src.contains("fetch('/messenger/api/badge', {credentials: 'include'})"));
+    assert!(src.contains("parseInt(d.total, 10)"));
+    assert!(!src.contains("check-notifications"), "the EvolveApp endpoint is gone from the Messenger shell");
+}
+
+#[test]
+fn nothing_in_the_shell_reloads_or_navigates_on_a_resize() {
+    let src = main_rs();
+    assert!(!src.contains("WindowEvent::Resized"), "no resize handler");
+    assert!(!src.contains("location.reload") && !src.contains("location.href") && !src.contains("location.replace") && !src.contains(".navigate("), "no scripted navigation or reload anywhere");
 }
