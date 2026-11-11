@@ -6,7 +6,7 @@
 
 pub const APP_HOST: &str = "evolvepreneuriq.app";
 pub const START_PATH: &str = "/chat/desktop";
-pub const CONFIRMED: bool = false;
+pub const CONFIRMED: bool = true;
 
 pub fn start_url() -> String {
     format!("https://{APP_HOST}{START_PATH}")
