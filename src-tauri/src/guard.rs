@@ -10,9 +10,9 @@ pub fn is_app_url(scheme: &str, host: Option<&str>) -> bool {
 /// Pages of the app host that belong in THIS window: the chat and the sign-in pages. Any other page of the site (a contact, an invoice, the dashboard) opens in the system browser instead,
 /// so the chat window never turns into the whole EIQ app.
 // The first path words of the phone Messenger host's pages (MOBILE APPS, 11 Nov): clicks on these stay in the window, everything else opens in the system browser.
-pub const IN_WINDOW: [&str; 21] = [
+pub const IN_WINDOW: [&str; 22] = [
     "app", "apps", "app-components", "login", "login_check", "logout", "switch", "messenger", "chat", "chatbot", "workspace", "communication-hub", "email-manager", "va-api", "api", "data-tables",
-    "books", "2fa", "forgot", "reset", "register",
+    "books", "search", "2fa", "forgot", "reset", "register",
 ];
 
 pub fn is_in_window_path(path: &str) -> bool {
@@ -97,10 +97,10 @@ mod tests {
 
     #[test]
     fn only_the_chat_and_sign_in_pages_stay_in_the_window() {
-        for p in ["/chat", "/chat/desktop", "/chat?embed=1", "/chat/channel/5", "/login", "/login/", "/login_check", "/2fa/check", "/logout", "/forgot", "/reset/abc", "/register", "/app/13", "/switch/5", "/messenger/api/badge", "/communication-hub/x"] {
+        for p in ["/chat", "/chat/desktop", "/chat?embed=1", "/chat/channel/5", "/login", "/login/", "/login_check", "/2fa/check", "/logout", "/forgot", "/reset/abc", "/register", "/app/13", "/switch/5", "/messenger/api/badge", "/communication-hub/x", "/search", "/search?q=anna", "/search/quick"] {
             assert!(is_in_window_path(p), "{p}");
         }
-        for p in ["/", "/crm/contacts/5", "/dashboard", "/chatter", "/loginfo", "/admin/chat", "/appx", "/switcher", "/admin/lab", ""] {
+        for p in ["/", "/crm/contacts/5", "/dashboard", "/chatter", "/loginfo", "/admin/chat", "/appx", "/switcher", "/admin/lab", "/searching", "/research", ""] {
             assert!(!is_in_window_path(p), "{p}");
         }
     }
