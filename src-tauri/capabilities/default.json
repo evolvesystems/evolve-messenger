@@ -5,11 +5,12 @@
   "windows": ["main"],
   "remote": {
     "urls": [
-      "https://messager.evolvepreneuriq.app/*"
+      "https://evolvepreneuriq.app/*"
     ]
   },
   "permissions": [
     "allow-report-unread",
+    "allow-report-signed-out",
     "allow-open-external-url"
   ]
 }

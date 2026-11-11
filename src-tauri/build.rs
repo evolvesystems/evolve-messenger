@@ -2,6 +2,7 @@
 // Without it the messenger page gets "Command X not allowed by ACL" (the EvolveApp 2.4.21 lesson). tests/acl.rs fails when the three drift apart.
 const COMMANDS: &[&str] = &[
     "report_unread",
+    "report_signed_out",
     "open_external_url",
 ];
 

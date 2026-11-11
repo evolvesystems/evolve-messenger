@@ -13,3 +13,10 @@ fn the_updater_public_key_is_set_and_is_a_public_key() {
     assert!(key.chars().all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '='), "must be the base64 text");
     assert!(!key.to_lowercase().contains("secret"), "that looks like a private key");
 }
+
+#[test]
+#[ignore = "the desktop Team Chat page path is not confirmed yet (src/start.rs CONFIRMED)"]
+fn the_start_page_is_confirmed_before_publishing() {
+    let t = fs::read_to_string("src/start.rs").unwrap();
+    assert!(t.contains("pub const CONFIRMED: bool = true;"), "set the real START_PATH and flip CONFIRMED once the desktop Team Chat page is live");
+}

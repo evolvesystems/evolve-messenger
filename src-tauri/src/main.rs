@@ -1,6 +1,6 @@
 // Evolve Messenger: the Evolve team chat as its own desktop app.
 //
-// One window that shows https://messager.evolvepreneuriq.app (the same site the phone app loads), a tray icon, a native notification when unread chats rise,
+// One window that shows the desktop Team Chat page on the main host (src/start.rs), a tray icon, a native notification when unread chats rise,
 // an updater that reads /api/v1/desktop/apps/messenger/updates/... (never EvolveApp's feed), optional launch at login (off by default) and a single running copy.
 // Everything testable without the Tauri toolchain lives in guard.rs, unread.rs and update_error.rs (std-only; unit tests inside, drift tests in src-tauri/tests).
 
@@ -21,10 +21,11 @@ use tauri_plugin_updater::UpdaterExt;
 
 mod diag;
 mod guard;
+mod start;
 mod unread;
 mod update_error;
 
-const APP_URL: &str = "https://messager.evolvepreneuriq.app";
+static SIGNED_OUT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 const WINDOW: &str = "main";
 
 static UNREAD: unread::Tracker = unread::Tracker::new();
@@ -46,6 +47,7 @@ async fn report_unread(app: tauri::AppHandle, webview: tauri::Webview, count: i6
     if !from_app(&webview) {
         return Err("report_unread: not allowed from this page".to_string());
     }
+    SIGNED_OUT.store(false, std::sync::atomic::Ordering::SeqCst); // a count came back: the person is signed in
     let new = UNREAD.record(count);
     if let Some(tray) = app.tray_by_id("main") {
         let _ = tray.set_tooltip(Some(unread::tooltip(count.max(0))));
@@ -53,6 +55,18 @@ async fn report_unread(app: tauri::AppHandle, webview: tauri::Webview, count: i6
     if new > 0 {
         diag::log(&format!("unread rose by {}", new));
         let _ = app.notification().builder().title("Evolve Messenger").body(unread::body(new)).show();
+    }
+    Ok(())
+}
+
+/// The page's poll got a 401: the person is signed out. The timer stops asking until a count comes back (the same fix as EvolveApp's EVO-BUG-20077).
+#[tauri::command]
+async fn report_signed_out(webview: tauri::Webview) -> Result<(), String> {
+    if !from_app(&webview) {
+        return Err("report_signed_out: not allowed from this page".to_string());
+    }
+    if !SIGNED_OUT.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        diag::log("poll unauthorized: polling paused until sign-in");
     }
     Ok(())
 }
@@ -161,9 +175,10 @@ async fn install_update(app: tauri::AppHandle) {
 /// Run inside the messenger page: tell the app how many chats are unread (the page's own login does the request).
 const UNREAD_POLL_JS: &str = r#"
 (async function() {
-    if (!window.__TAURI_INTERNALS__ || location.hostname !== 'messager.evolvepreneuriq.app') return;
+    if (!window.__TAURI_INTERNALS__ || location.hostname !== '__HOST__') return;
     try {
         var r = await fetch('/api/v1/desktop/check-notifications', {credentials: 'include'});
+        if (r.status === 401) { window.__TAURI_INTERNALS__.invoke('report_signed_out'); return; }
         if (r.ok) {
             var d = await r.json();
             window.__TAURI_INTERNALS__.invoke('report_unread', {count: parseInt(d.unread_chats, 10) || 0});
@@ -183,7 +198,7 @@ const EXTERNAL_LINKS_JS: &str = r#"
         if (!el || !el.href) return;
         try {
             var u = new URL(el.href);
-            var internal = u.hostname === 'messager.evolvepreneuriq.app';
+            var internal = u.hostname === '__HOST__';
             if (!internal || el.target === '_blank') {
                 if (u.protocol === 'https:' || u.protocol === 'http:' || u.protocol === 'mailto:') {
                     e.preventDefault();
@@ -203,7 +218,7 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
-        .invoke_handler(tauri::generate_handler![report_unread, open_external_url])
+        .invoke_handler(tauri::generate_handler![report_unread, report_signed_out, open_external_url])
         .setup(|app| {
             let log_dir = app.path().app_log_dir().unwrap_or_else(|_| std::env::temp_dir().join("evolvemessenger-logs"));
             diag::init(log_dir);
@@ -218,11 +233,30 @@ fn main() {
 
             // Started by "launch at login" (--hidden): stay in the tray until opened.
             let hidden = std::env::args().any(|a| a == "--hidden");
-            let url = tauri::Url::parse(APP_URL).expect("APP_URL is a valid URL");
+            let url = tauri::Url::parse(&start::start_url()).expect("the start address is a valid URL");
             let window = WebviewWindowBuilder::new(app, WINDOW, WebviewUrl::External(url))
                 .title("Evolve Messenger")
-                .inner_size(420.0, 720.0)
-                .min_inner_size(360.0, 480.0)
+                .inner_size(1100.0, 760.0)
+                .min_inner_size(800.0, 520.0)
+                .on_navigation(|url| guard::is_navigation_allowed(url.scheme(), url.host_str()))
+                .on_download(|webview, event| match event {
+                    // Attachments go straight to the Downloads folder under a safe name (the desktop chat page offers file downloads).
+                    tauri::webview::DownloadEvent::Requested { destination, .. } => {
+                        let name = guard::safe_file_name(&destination.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
+                        match webview.app_handle().path().download_dir() {
+                            Ok(dir) => {
+                                *destination = dir.join(name);
+                                true
+                            }
+                            Err(_) => false,
+                        }
+                    }
+                    tauri::webview::DownloadEvent::Finished { success, .. } => {
+                        diag::log(if success { "download finished" } else { "download failed" });
+                        true
+                    }
+                    _ => true,
+                })
                 .user_agent(&format!("EvolveMessenger/{} Tauri/2", env!("CARGO_PKG_VERSION")))
                 .visible(!hidden)
                 .on_page_load(|webview, payload| {
@@ -230,8 +264,8 @@ fn main() {
                     if let PageLoadEvent::Finished = payload.event() {
                         diag::crumb(&format!("page-load finished {}{}", u.host_str().unwrap_or("?"), u.path()));
                         if guard::is_app_url(u.scheme(), u.host_str()) {
-                            let _ = webview.eval(EXTERNAL_LINKS_JS);
-                            let _ = webview.eval(UNREAD_POLL_JS);
+                            let _ = webview.eval(&EXTERNAL_LINKS_JS.replace("__HOST__", guard::APP_HOST));
+                            let _ = webview.eval(&UNREAD_POLL_JS.replace("__HOST__", guard::APP_HOST));
                         }
                     }
                 })
@@ -296,8 +330,11 @@ fn main() {
                 let h = app.handle().clone();
                 std::thread::spawn(move || loop {
                     std::thread::sleep(Duration::from_secs(60));
+                    if SIGNED_OUT.load(std::sync::atomic::Ordering::SeqCst) {
+                        continue; // signed out: no polling until the page reports a count again
+                    }
                     if let Some(w) = h.get_webview_window(WINDOW) {
-                        let _ = w.eval(UNREAD_POLL_JS);
+                        let _ = w.eval(&UNREAD_POLL_JS.replace("__HOST__", guard::APP_HOST));
                     }
                 });
             }

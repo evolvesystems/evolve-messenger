@@ -48,9 +48,9 @@ fn nothing_is_granted_that_the_app_does_not_have() {
 }
 
 #[test]
-fn only_the_messenger_host_is_a_remote_url() {
+fn only_the_main_host_is_a_remote_url() {
     let cap = fs::read_to_string("capabilities/default.json").unwrap();
-    assert!(cap.contains("https://messager.evolvepreneuriq.app/*"));
+    assert!(cap.contains("https://evolvepreneuriq.app/*"));
     assert!(!cap.contains("*.evolvepreneuriq.app"), "no wildcard subdomains: tenant pages live there");
-    assert!(!cap.contains("\"https://evolvepreneuriq.app/*\""));
+    assert!(!cap.contains("messager.evolvepreneuriq.app"), "1.0.1 does not load the phone host");
 }
