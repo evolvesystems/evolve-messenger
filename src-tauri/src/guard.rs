@@ -1,7 +1,7 @@
 //! Origin and URL guards for the commands the messenger page may call. std-only so it is tested without the Tauri toolchain.
 
 /// The one host this app loads (1.0.1: the main host, where the desktop Team Chat page lives). Every command refuses a caller whose page is anywhere else.
-pub const APP_HOST: &str = "evolvepreneuriq.app";
+pub const APP_HOST: &str = "messager.evolvepreneuriq.app";
 
 pub fn is_app_url(scheme: &str, host: Option<&str>) -> bool {
     scheme == "https" && host == Some(APP_HOST)
@@ -44,16 +44,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn only_the_main_host_over_https_is_the_app() {
-        assert!(is_app_url("https", Some("evolvepreneuriq.app")));
+    fn only_the_messenger_host_over_https_is_the_app() {
+        assert!(is_app_url("https", Some("messager.evolvepreneuriq.app")));
         for (s, h) in [
-            ("http", Some("evolvepreneuriq.app")),
-            ("https", Some("messager.evolvepreneuriq.app")),
-            ("https", Some("evil.evolvepreneuriq.app")),
-            ("https", Some("evolvepreneuriq.app.evil.test")),
-            ("https", Some("EVOLVEPRENEURIQ.app.")),
+            ("http", Some("messager.evolvepreneuriq.app")),
+            ("https", Some("evolvepreneuriq.app")),
+            ("https", Some("evil.messager.evolvepreneuriq.app")),
+            ("https", Some("messager.evolvepreneuriq.app.evil.test")),
+            ("https", Some("MESSAGER.evolvepreneuriq.app.")),
             ("https", None),
-            ("file", Some("evolvepreneuriq.app")),
+            ("file", Some("messager.evolvepreneuriq.app")),
         ] {
             assert!(!is_app_url(s, h), "{} {:?}", s, h);
         }
@@ -72,9 +72,9 @@ mod tests {
 
     #[test]
     fn the_window_may_only_navigate_within_the_app_host() {
-        assert!(is_navigation_allowed("https", Some("evolvepreneuriq.app")));
+        assert!(is_navigation_allowed("https", Some("messager.evolvepreneuriq.app")));
         assert!(is_navigation_allowed("about", None));
-        for (s, h) in [("https", Some("example.com")), ("http", Some("evolvepreneuriq.app")), ("file", None), ("javascript", None), ("data", None)] {
+        for (s, h) in [("https", Some("example.com")), ("http", Some("messager.evolvepreneuriq.app")), ("https", Some("evolvepreneuriq.app")), ("file", None), ("javascript", None), ("data", None)] {
             assert!(!is_navigation_allowed(s, h), "{s} {h:?}");
         }
     }

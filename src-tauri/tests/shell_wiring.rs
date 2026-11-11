@@ -7,14 +7,13 @@ fn main_rs() -> String {
 }
 
 #[test]
-fn the_app_opens_the_start_address_and_the_old_phone_host_is_gone_from_the_code() {
+fn the_app_opens_the_start_address_on_the_messenger_host() {
     let src = main_rs();
     assert!(src.contains("tauri::Url::parse(&start::start_url())"));
     assert!(!src.contains("const APP_URL"));
-    for f in ["src/main.rs", "src/guard.rs", "src/start.rs", "capabilities/default.json"] {
+    for f in ["src/guard.rs", "src/start.rs", "capabilities/default.json"] {
         let t = fs::read_to_string(f).unwrap();
-        let live: Vec<&str> = t.lines().filter(|l| l.contains("messager.evolvepreneuriq.app") && !l.trim_start().starts_with("//") && !l.contains("(\"https\", Some(")).collect();
-        assert!(live.is_empty(), "{f} still names the phone host: {live:?}");
+        assert!(t.contains("messager.evolvepreneuriq.app"), "{f} names the Messenger host");
     }
 }
 
@@ -74,4 +73,45 @@ fn the_voice_note_microphone_is_declared_for_macos() {
     let ent = fs::read_to_string("Entitlements.plist").unwrap();
     let i = ent.find("com.apple.security.device.audio-input").expect("audio-input");
     assert!(ent[i..].contains("<true/>"));
+}
+
+#[test]
+fn the_unread_count_drives_the_badge_and_the_tray_tooltip() {
+    let src = main_rs();
+    let u = src.find("async fn report_unread").unwrap();
+    let body = &src[u..u + 900];
+    assert!(body.contains("show_badge(&app, count.max(0));"));
+    assert!(src.contains("w.set_badge_count(badge::badge_value(count))"));
+    assert!(src.contains("w.set_overlay_icon(icon)"), "Windows taskbar overlay");
+}
+
+#[test]
+fn automatic_install_waits_for_a_quiet_moment_and_respects_the_tray_switch() {
+    let src = main_rs();
+    let t = src.find("quiet moment, installing automatically").expect("auto install");
+    let before = &src[t - 700..t];
+    assert!(before.contains("auto_install_on(&h)"), "the tray switch is checked");
+    assert!(before.contains("quiet::is_quiet("), "the quiet rule is checked");
+    assert!(before.contains("pending"), "only when an update was found");
+    assert!(src[t..t + 200].contains("install_update(h2)"), "the same signed install as the tray item");
+    assert!(src.contains("\"auto_install\" =>"), "tray switch handler");
+    assert!(src.contains("\"Install updates automatically\""));
+}
+
+#[test]
+fn the_window_being_in_front_or_downloading_blocks_the_automatic_install() {
+    let src = main_rs();
+    assert!(src.contains("WindowEvent::Focused(true) => AWAY_SINCE.store(0,"), "in front resets the clock");
+    assert!(src.contains("DOWNLOADS.fetch_add(1"), "a requested download is counted");
+    assert!(src.contains("DOWNLOADS.load("), "and read by the install rule");
+}
+
+#[test]
+fn the_updated_to_marker_is_written_before_the_restart_and_shown_once() {
+    let src = main_rs();
+    let m = src.find("quiet::marker_text(&update.version)").expect("marker written");
+    let r = src.find("app.restart();").expect("restart");
+    assert!(m < r, "marker before restart");
+    assert!(src.contains("std::fs::remove_file(&p)"), "the marker is deleted after it is read");
+    assert!(src.contains("quiet::version_from_marker(&text)"), "only a plain version number is shown");
 }

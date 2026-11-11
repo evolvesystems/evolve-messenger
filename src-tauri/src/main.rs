@@ -19,8 +19,10 @@ use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_updater::UpdaterExt;
 
+mod badge;
 mod diag;
 mod guard;
+mod quiet;
 mod start;
 mod unread;
 mod update_error;
@@ -29,6 +31,44 @@ static SIGNED_OUT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool
 const WINDOW: &str = "main";
 
 static UNREAD: unread::Tracker = unread::Tracker::new();
+/// When the window last left the front (seconds since the epoch); 0 = it is in front now. Drives the automatic-install quiet moment.
+static AWAY_SINCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Files being saved right now (an automatic install never starts while one is).
+static DOWNLOADS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+static STARTED_AT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
+fn config_file(app: &tauri::AppHandle, name: &str) -> Option<std::path::PathBuf> {
+    app.path().app_config_dir().ok().map(|d| d.join(name))
+}
+
+fn auto_install_on(app: &tauri::AppHandle) -> bool {
+    quiet::auto_install_enabled(config_file(app, "auto_install").and_then(|p| std::fs::read_to_string(p).ok()).as_deref())
+}
+
+fn set_auto_install(app: &tauri::AppHandle, on: bool) {
+    if let Some(p) = config_file(app, "auto_install") {
+        if let Some(dir) = p.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(p, quiet::setting_text(on));
+    }
+}
+
+/// The unread badge on every platform: Windows gets a drawn overlay icon on the taskbar button, macOS and Linux the platform's own count (one call each; unsupported ones are ignored).
+fn show_badge(app: &tauri::AppHandle, count: i64) {
+    if let Some(w) = app.get_webview_window(WINDOW) {
+        let _ = w.set_badge_count(badge::badge_value(count));
+        #[cfg(target_os = "windows")]
+        {
+            let icon = badge::overlay_rgba(count).map(|px| tauri::image::Image::new_owned(px, badge::SIZE, badge::SIZE));
+            let _ = w.set_overlay_icon(icon);
+        }
+    }
+}
 
 struct PendingUpdate(Mutex<Option<tauri_plugin_updater::Update>>);
 struct InstallItem(MenuItem<tauri::Wry>);
@@ -52,6 +92,7 @@ async fn report_unread(app: tauri::AppHandle, webview: tauri::Webview, count: i6
     if let Some(tray) = app.tray_by_id("main") {
         let _ = tray.set_tooltip(Some(unread::tooltip(count.max(0))));
     }
+    show_badge(&app, count.max(0));
     if new > 0 {
         diag::log(&format!("unread rose by {}", new));
         let _ = app.notification().builder().title("Evolve Messenger").body(unread::body(new)).show();
@@ -169,6 +210,12 @@ async fn install_update(app: tauri::AppHandle) {
         return;
     }
     diag::log("update: installed, restarting");
+    if let Some(p) = config_file(&app, "updated_to") {
+        if let Some(dir) = p.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(p, quiet::marker_text(&update.version));
+    }
     app.restart();
 }
 
@@ -242,16 +289,21 @@ fn main() {
                 .on_download(|webview, event| match event {
                     // Attachments go straight to the Downloads folder under a safe name (the desktop chat page offers file downloads).
                     tauri::webview::DownloadEvent::Requested { destination, .. } => {
+                        DOWNLOADS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                         let name = guard::safe_file_name(&destination.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
                         match webview.app_handle().path().download_dir() {
                             Ok(dir) => {
                                 *destination = dir.join(name);
                                 true
                             }
-                            Err(_) => false,
+                            Err(_) => {
+                                DOWNLOADS.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                                false
+                            }
                         }
                     }
                     tauri::webview::DownloadEvent::Finished { success, .. } => {
+                        let _ = DOWNLOADS.fetch_update(std::sync::atomic::Ordering::SeqCst, std::sync::atomic::Ordering::SeqCst, |n| n.checked_sub(1));
                         diag::log(if success { "download finished" } else { "download failed" });
                         true
                     }
@@ -274,9 +326,18 @@ fn main() {
             // The red X hides the window; the tray keeps the app (and its notifications) alive. Quit is in the tray menu.
             let w = window.clone();
             window.on_window_event(move |event| {
-                if let WindowEvent::CloseRequested { api, .. } = event {
-                    api.prevent_close();
-                    let _ = w.hide();
+                match event {
+                    WindowEvent::CloseRequested { api, .. } => {
+                        api.prevent_close();
+                        let _ = w.hide();
+                        let _ = AWAY_SINCE.compare_exchange(0, now_secs().max(1), std::sync::atomic::Ordering::SeqCst, std::sync::atomic::Ordering::SeqCst);
+                    }
+                    // In front = not quiet. Out of focus starts the clock (the first time only).
+                    WindowEvent::Focused(true) => AWAY_SINCE.store(0, std::sync::atomic::Ordering::SeqCst),
+                    WindowEvent::Focused(false) => {
+                        let _ = AWAY_SINCE.compare_exchange(0, now_secs().max(1), std::sync::atomic::Ordering::SeqCst, std::sync::atomic::Ordering::SeqCst);
+                    }
+                    _ => {}
                 }
             });
 
@@ -284,13 +345,14 @@ fn main() {
             let launch_at_login = app.autolaunch().is_enabled().unwrap_or(false);
             let m_open = MenuItem::with_id(app, "open", "Open Evolve Messenger", true, None::<&str>)?;
             let m_login = CheckMenuItem::with_id(app, "launch_at_login", "Launch at login", true, launch_at_login, None::<&str>)?;
+            let m_auto = CheckMenuItem::with_id(app, "auto_install", "Install updates automatically", true, auto_install_on(&app.handle().clone()), None::<&str>)?;
             let m_check = MenuItem::with_id(app, "check_updates", "Check for updates", true, None::<&str>)?;
             let m_install = MenuItem::with_id(app, "install_update", "No update to install", false, None::<&str>)?;
             let m_logs = MenuItem::with_id(app, "open_logs", "Open log folder (for support)", true, None::<&str>)?;
             let m_quit = MenuItem::with_id(app, "quit", "Quit Evolve Messenger", true, None::<&str>)?;
             let sep1 = PredefinedMenuItem::separator(app)?;
             let sep2 = PredefinedMenuItem::separator(app)?;
-            let menu = Menu::with_items(app, &[&m_open, &m_login, &sep1, &m_check, &m_install, &m_logs, &sep2, &m_quit])?;
+            let menu = Menu::with_items(app, &[&m_open, &m_login, &m_auto, &sep1, &m_check, &m_install, &m_logs, &sep2, &m_quit])?;
             app.manage(InstallItem(m_install.clone()));
 
             TrayIconBuilder::with_id("main")
@@ -305,6 +367,11 @@ fn main() {
                         if let Err(e) = result {
                             diag::log(&format!("launch at login could not be changed: {}", e));
                         }
+                    }
+                    "auto_install" => {
+                        let on = !auto_install_on(app);
+                        set_auto_install(app, on);
+                        diag::log(&format!("automatic install {}", quiet::setting_text(on)));
                     }
                     "check_updates" => {
                         let h = app.clone();
@@ -337,6 +404,33 @@ fn main() {
                         let _ = w.eval(&UNREAD_POLL_JS.replace("__HOST__", guard::APP_HOST));
                     }
                 });
+            }
+            // 1.0.2: an update found earlier installs by itself at a quiet moment (window away 10 min, no download, 5 min uptime) unless the tray switch is off.
+            STARTED_AT.store(now_secs().max(1), std::sync::atomic::Ordering::SeqCst);
+            {
+                let h = app.handle().clone();
+                std::thread::spawn(move || loop {
+                    std::thread::sleep(Duration::from_secs(60));
+                    let away = AWAY_SINCE.load(std::sync::atomic::Ordering::SeqCst);
+                    let pending = h.state::<PendingUpdate>().0.lock().map(|g| g.is_some()).unwrap_or(false);
+                    if pending
+                        && auto_install_on(&h)
+                        && quiet::is_quiet((away != 0).then_some(away), now_secs(), DOWNLOADS.load(std::sync::atomic::Ordering::SeqCst), STARTED_AT.load(std::sync::atomic::Ordering::SeqCst))
+                    {
+                        diag::log("update: quiet moment, installing automatically");
+                        let h2 = h.clone();
+                        tauri::async_runtime::block_on(install_update(h2));
+                    }
+                });
+            }
+            // After an automatic or manual update the previous version left a one-line marker: say so once.
+            if let Some(p) = config_file(&app.handle().clone(), "updated_to") {
+                if let Ok(text) = std::fs::read_to_string(&p) {
+                    let _ = std::fs::remove_file(&p);
+                    if let Some(v) = quiet::version_from_marker(&text) {
+                        say(&app.handle().clone(), &format!("Evolve Messenger was updated to version {}.", v));
+                    }
+                }
             }
             // Update check: 30 s after start, then every 6 hours.
             {
