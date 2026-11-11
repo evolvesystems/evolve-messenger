@@ -7,6 +7,15 @@ pub fn is_app_url(scheme: &str, host: Option<&str>) -> bool {
     scheme == "https" && host == Some(APP_HOST)
 }
 
+/// Pages of the app host that belong in THIS window: the chat and the sign-in pages. Any other page of the site (a contact, an invoice, the dashboard) opens in the system browser instead,
+/// so the chat window never turns into the whole EIQ app.
+pub const IN_WINDOW: [&str; 7] = ["chat", "login", "2fa", "logout", "forgot", "reset", "register"];
+
+pub fn is_in_window_path(path: &str) -> bool {
+    let first = path.trim_start_matches('/').split(['/', '?', '#']).next().unwrap_or("");
+    IN_WINDOW.contains(&first)
+}
+
 /// Top-level navigations the window may make: the app host over https (and about:blank). Everything else is refused; links to other sites go to the system browser.
 pub fn is_navigation_allowed(scheme: &str, host: Option<&str>) -> bool {
     is_app_url(scheme, host) || (scheme == "about" && host.is_none())
@@ -80,5 +89,15 @@ mod tests {
         assert_eq!(safe_file_name("..."), "download");
         assert_eq!(safe_file_name("   "), "download");
         assert_eq!(safe_file_name(&"x".repeat(300)).len(), 120);
+    }
+
+    #[test]
+    fn only_the_chat_and_sign_in_pages_stay_in_the_window() {
+        for p in ["/chat", "/chat/desktop", "/chat?embed=1", "/chat/channel/5", "/login", "/login/", "/2fa/check", "/logout", "/forgot", "/reset/abc", "/register"] {
+            assert!(is_in_window_path(p), "{p}");
+        }
+        for p in ["/", "/crm/contacts/5", "/dashboard", "/chatter", "/loginfo", "/admin/chat", "/api/v1/desktop/check-notifications", ""] {
+            assert!(!is_in_window_path(p), "{p}");
+        }
     }
 }

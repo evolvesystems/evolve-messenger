@@ -30,6 +30,13 @@ fn the_host_in_the_page_scripts_comes_from_the_one_constant() {
 }
 
 #[test]
+fn links_to_other_pages_of_the_site_open_in_the_system_browser_not_in_the_chat_window() {
+    let src = main_rs();
+    assert!(src.contains("var internal = u.hostname === '__HOST__' && /^\\/(__PATHS__)([\\/?#]|$)/.test(u.pathname);"));
+    assert!(src.contains(".replace(\"__PATHS__\", &guard::IN_WINDOW.join(\"|\"))"), "the allowed first path parts come from guard.rs, one list");
+}
+
+#[test]
 fn the_window_is_desktop_sized_stays_on_its_host_and_saves_downloads_safely() {
     let src = main_rs();
     assert!(src.contains(".inner_size(1100.0, 760.0)") && src.contains(".min_inner_size(800.0, 520.0)"));

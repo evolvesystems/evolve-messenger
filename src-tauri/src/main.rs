@@ -198,7 +198,7 @@ const EXTERNAL_LINKS_JS: &str = r#"
         if (!el || !el.href) return;
         try {
             var u = new URL(el.href);
-            var internal = u.hostname === '__HOST__';
+            var internal = u.hostname === '__HOST__' && /^\/(__PATHS__)([\/?#]|$)/.test(u.pathname);
             if (!internal || el.target === '_blank') {
                 if (u.protocol === 'https:' || u.protocol === 'http:' || u.protocol === 'mailto:') {
                     e.preventDefault();
@@ -264,7 +264,7 @@ fn main() {
                     if let PageLoadEvent::Finished = payload.event() {
                         diag::crumb(&format!("page-load finished {}{}", u.host_str().unwrap_or("?"), u.path()));
                         if guard::is_app_url(u.scheme(), u.host_str()) {
-                            let _ = webview.eval(&EXTERNAL_LINKS_JS.replace("__HOST__", guard::APP_HOST));
+                            let _ = webview.eval(&EXTERNAL_LINKS_JS.replace("__HOST__", guard::APP_HOST).replace("__PATHS__", &guard::IN_WINDOW.join("|")));
                             let _ = webview.eval(&UNREAD_POLL_JS.replace("__HOST__", guard::APP_HOST));
                         }
                     }
