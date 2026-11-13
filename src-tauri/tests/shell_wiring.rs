@@ -7,14 +7,17 @@ fn main_rs() -> String {
 }
 
 #[test]
-fn the_app_opens_the_start_address_on_the_messenger_host() {
+fn the_app_opens_the_desktop_team_chat_page_on_the_main_host() {
     let src = main_rs();
     assert!(src.contains("tauri::Url::parse(&start::start_url())"));
     assert!(!src.contains("const APP_URL"));
-    for f in ["src/guard.rs", "src/start.rs", "capabilities/default.json"] {
+    for f in ["src/start.rs", "capabilities/default.json"] {
         let t = fs::read_to_string(f).unwrap();
-        assert!(t.contains("messager.evolvepreneuriq.app"), "{f} names the Messenger host");
+        assert!(!t.contains("messager.evolvepreneuriq"), "{f} must not name the phone host");
     }
+    let start = fs::read_to_string("src/start.rs").unwrap();
+    assert!(start.contains("pub const START_PATH: &str = \"/chat/desktop\";"), "the start is the desktop Team Chat page");
+    assert!(start.contains("pub const APP_HOST: &str = \"evolvepreneuriq.app\";"));
 }
 
 #[test]

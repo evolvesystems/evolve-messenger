@@ -5,7 +5,7 @@
   "windows": ["main"],
   "remote": {
     "urls": [
-      "https://messager.evolvepreneuriq.app/*"
+      "https://evolvepreneuriq.app/*"
     ]
   },
   "permissions": [

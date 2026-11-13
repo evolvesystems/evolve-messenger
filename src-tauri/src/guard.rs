@@ -1,7 +1,7 @@
 //! Origin and URL guards for the commands the messenger page may call. std-only so it is tested without the Tauri toolchain.
 
 /// The one host this app loads (1.0.1: the main host, where the desktop Team Chat page lives). Every command refuses a caller whose page is anywhere else.
-pub const APP_HOST: &str = "messager.evolvepreneuriq.app";
+pub const APP_HOST: &str = "evolvepreneuriq.app";
 
 pub fn is_app_url(scheme: &str, host: Option<&str>) -> bool {
     scheme == "https" && host == Some(APP_HOST)
@@ -9,11 +9,7 @@ pub fn is_app_url(scheme: &str, host: Option<&str>) -> bool {
 
 /// Pages of the app host that belong in THIS window: the chat and the sign-in pages. Any other page of the site (a contact, an invoice, the dashboard) opens in the system browser instead,
 /// so the chat window never turns into the whole EIQ app.
-// The first path words of the phone Messenger host's pages (MOBILE APPS, 11 Nov): clicks on these stay in the window, everything else opens in the system browser.
-pub const IN_WINDOW: [&str; 22] = [
-    "app", "apps", "app-components", "login", "login_check", "logout", "switch", "messenger", "chat", "chatbot", "workspace", "communication-hub", "email-manager", "va-api", "api", "data-tables",
-    "books", "search", "2fa", "forgot", "reset", "register",
-];
+pub const IN_WINDOW: [&str; 7] = ["chat", "login", "2fa", "logout", "forgot", "reset", "register"];
 
 pub fn is_in_window_path(path: &str) -> bool {
     let first = path.trim_start_matches('/').split(['/', '?', '#']).next().unwrap_or("");
@@ -48,16 +44,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn only_the_messenger_host_over_https_is_the_app() {
-        assert!(is_app_url("https", Some("messager.evolvepreneuriq.app")));
+    fn only_the_main_host_over_https_is_the_app() {
+        assert!(is_app_url("https", Some("evolvepreneuriq.app")));
         for (s, h) in [
-            ("http", Some("messager.evolvepreneuriq.app")),
-            ("https", Some("evolvepreneuriq.app")),
-            ("https", Some("evil.messager.evolvepreneuriq.app")),
-            ("https", Some("messager.evolvepreneuriq.app.evil.test")),
-            ("https", Some("MESSAGER.evolvepreneuriq.app.")),
+            ("http", Some("evolvepreneuriq.app")),
+            ("https", Some("messager.evolvepreneuriq.app")),
+            ("https", Some("evil.evolvepreneuriq.app")),
+            ("https", Some("evolvepreneuriq.app.evil.test")),
+            ("https", Some("EVOLVEPRENEURIQ.app.")),
             ("https", None),
-            ("file", Some("messager.evolvepreneuriq.app")),
+            ("file", Some("evolvepreneuriq.app")),
         ] {
             assert!(!is_app_url(s, h), "{} {:?}", s, h);
         }
@@ -76,9 +72,9 @@ mod tests {
 
     #[test]
     fn the_window_may_only_navigate_within_the_app_host() {
-        assert!(is_navigation_allowed("https", Some("messager.evolvepreneuriq.app")));
+        assert!(is_navigation_allowed("https", Some("evolvepreneuriq.app")));
         assert!(is_navigation_allowed("about", None));
-        for (s, h) in [("https", Some("example.com")), ("http", Some("messager.evolvepreneuriq.app")), ("https", Some("evolvepreneuriq.app")), ("file", None), ("javascript", None), ("data", None)] {
+        for (s, h) in [("https", Some("example.com")), ("http", Some("evolvepreneuriq.app")), ("file", None), ("javascript", None), ("data", None)] {
             assert!(!is_navigation_allowed(s, h), "{s} {h:?}");
         }
     }
@@ -97,10 +93,10 @@ mod tests {
 
     #[test]
     fn only_the_chat_and_sign_in_pages_stay_in_the_window() {
-        for p in ["/chat", "/chat/desktop", "/chat?embed=1", "/chat/channel/5", "/login", "/login/", "/login_check", "/2fa/check", "/logout", "/forgot", "/reset/abc", "/register", "/app/13", "/switch/5", "/messenger/api/badge", "/communication-hub/x", "/search", "/search?q=anna", "/search/quick"] {
+        for p in ["/chat", "/chat/desktop", "/chat?embed=1", "/chat/channel/5", "/login", "/login/", "/2fa/check", "/logout", "/forgot", "/reset/abc", "/register"] {
             assert!(is_in_window_path(p), "{p}");
         }
-        for p in ["/", "/crm/contacts/5", "/dashboard", "/chatter", "/loginfo", "/admin/chat", "/appx", "/switcher", "/admin/lab", "/searching", "/research", ""] {
+        for p in ["/", "/crm/contacts/5", "/dashboard", "/chatter", "/loginfo", "/admin/chat", "/api/v1/desktop/check-notifications", ""] {
             assert!(!is_in_window_path(p), "{p}");
         }
     }
