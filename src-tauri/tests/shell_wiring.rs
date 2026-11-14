@@ -24,7 +24,7 @@ fn the_app_opens_the_desktop_team_chat_page_on_the_main_host() {
 fn the_host_in_the_page_scripts_comes_from_the_one_constant() {
     let src = main_rs();
     assert!(src.contains("location.hostname !== '__HOST__'") && src.contains("u.hostname === '__HOST__'"));
-    assert_eq!(src.matches(".replace(\"__HOST__\", guard::APP_HOST)").count(), 4, "both scripts on page load, the timer, and the window coming to the front");
+    assert_eq!(src.matches(".replace(\"__HOST__\", guard::APP_HOST)").count(), 5, "both scripts on page load, the live stream, the timer, and the window coming to the front");
     let guard = fs::read_to_string("src/guard.rs").unwrap();
     let start = fs::read_to_string("src/start.rs").unwrap();
     let h = |t: &str| t.lines().find(|l| l.contains("pub const APP_HOST")).unwrap().split('"').nth(1).unwrap().to_string();
@@ -155,4 +155,18 @@ fn the_unread_poll_is_every_15_seconds_one_call_at_a_time_and_runs_when_the_wind
     assert!(poll.contains("took * 4"), "a slow answer slows the next calls");
     let focus = &src[src.find("WindowEvent::Focused(true)").unwrap()..];
     assert!(focus[..400].contains("UNREAD_POLL_JS"), "coming to the front polls at once");
+}
+
+#[test]
+fn the_live_unread_stream_is_started_per_page_and_the_poll_stays_as_the_backstop() {
+    let src = main_rs();
+    assert!(src.contains("const LIVE_UNREAD_JS: &str = include_str!(\"live_unread.js\");"));
+    assert!(src.contains("webview.eval(&LIVE_UNREAD_JS.replace(\"__HOST__\", guard::APP_HOST))"), "started on every app page load");
+    let poll = &src[src.find("const UNREAD_POLL_JS").unwrap()..src.find("const LIVE_UNREAD_JS").unwrap()];
+    assert!(poll.contains("window.__evolve_live_ok && Date.now() - (window.__evolve_last_poll || 0) < 60000"), "only a 60 s backstop while the stream is open");
+    assert!(poll.contains("window.__evolve_last_poll = Date.now();"));
+    let js = fs::read_to_string("src/live_unread.js").unwrap();
+    assert!(js.contains("/api/v1/desktop/live-auth") && js.contains("'Authorization': 'Bearer '"), "key from the site, bearer header (never the token in the URL)");
+    assert!(!js.contains("authorization="), "no token in a URL");
+    assert!(fs::metadata("tests/live_unread_harness.mjs").is_ok(), "the node harness that tests the script logic ships with it");
 }

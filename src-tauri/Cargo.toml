@@ -1,6 +1,6 @@
 [package]
 name = "evolve-messenger"
-version = "1.0.4"
+version = "1.0.5"
 description = "Evolve Messenger - the Evolve team chat as its own desktop app"
 authors = ["Evolve Systems"]
 edition = "2021"
