@@ -32,6 +32,8 @@ const WINDOW: &str = "main";
 
 static UNREAD: unread::Tracker = unread::Tracker::new();
 /// When the window last left the front (seconds since the epoch); 0 = it is in front now. Drives the automatic-install quiet moment.
+/// Seconds between unread polls while the app runs (hidden or not: a hidden window is when the number and the notification matter most).
+const UNREAD_POLL_SECS: u64 = 15;
 static AWAY_SINCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// Files being saved right now (an automatic install never starts while one is).
 static DOWNLOADS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
@@ -225,14 +227,26 @@ const UNREAD_POLL_JS: &str = r#"
     if (!window.__TAURI_INTERNALS__ || location.hostname !== '__HOST__') return;
     // Never from a sign-in page: a signed-out request makes the site save that URL as "where to go after sign-in", and the window then landed on the raw JSON (Maki, 14 Nov).
     if (/^\/(login|login_check|2fa|forgot|reset|register|logout)([\/?#]|$)/.test(location.pathname)) return;
+    // One request at a time: a slow answer never stacks a second call, and a slow site (over 2 s) makes the next calls wait 4x as long.
+    if (window.__evolve_poll_busy || Date.now() < (window.__evolve_poll_next || 0)) return;
+    window.__evolve_poll_busy = true;
+    var t0 = Date.now();
+    var ctl = new AbortController();
+    var cut = setTimeout(function() { ctl.abort(); }, 10000);
     try {
-        var r = await fetch('/messenger/api/badge', {credentials: 'include', headers: {'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest'}});
+        var r = await fetch('/messenger/api/badge', {credentials: 'include', signal: ctl.signal, headers: {'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest'}});
         if (r.status === 401 || r.status === 403) { window.__TAURI_INTERNALS__.invoke('report_signed_out'); return; }
         if (r.ok) {
             var d = await r.json();
             window.__TAURI_INTERNALS__.invoke('report_unread', {count: parseInt(d.total, 10) || 0});
         }
-    } catch (e) {}
+    } catch (e) {
+    } finally {
+        clearTimeout(cut);
+        window.__evolve_poll_busy = false;
+        var took = Date.now() - t0;
+        window.__evolve_poll_next = took > 2000 ? Date.now() + took * 4 : 0;
+    }
 })();
 "#;
 
@@ -335,7 +349,11 @@ fn main() {
                         let _ = AWAY_SINCE.compare_exchange(0, now_secs().max(1), std::sync::atomic::Ordering::SeqCst, std::sync::atomic::Ordering::SeqCst);
                     }
                     // In front = not quiet. Out of focus starts the clock (the first time only).
-                    WindowEvent::Focused(true) => AWAY_SINCE.store(0, std::sync::atomic::Ordering::SeqCst),
+                    WindowEvent::Focused(true) => {
+                        AWAY_SINCE.store(0, std::sync::atomic::Ordering::SeqCst);
+                        // Coming to the front: refresh the number now, not at the next tick.
+                        let _ = w.eval(&UNREAD_POLL_JS.replace("__HOST__", guard::APP_HOST));
+                    }
                     WindowEvent::Focused(false) => {
                         let _ = AWAY_SINCE.compare_exchange(0, now_secs().max(1), std::sync::atomic::Ordering::SeqCst, std::sync::atomic::Ordering::SeqCst);
                     }
@@ -394,11 +412,11 @@ fn main() {
                 })
                 .build(app)?;
 
-            // Unread poll: every 60 s the messenger page is asked for its count (one timer; the page does the request with its own login).
+            // Unread poll: every 15 s (was 60) the messenger page is asked for its count (one timer; the page does the request with its own login and never has two in flight).
             {
                 let h = app.handle().clone();
                 std::thread::spawn(move || loop {
-                    std::thread::sleep(Duration::from_secs(60));
+                    std::thread::sleep(Duration::from_secs(UNREAD_POLL_SECS));
                     if SIGNED_OUT.load(std::sync::atomic::Ordering::SeqCst) {
                         continue; // signed out: no polling until the page reports a count again
                     }

@@ -24,7 +24,7 @@ fn the_app_opens_the_desktop_team_chat_page_on_the_main_host() {
 fn the_host_in_the_page_scripts_comes_from_the_one_constant() {
     let src = main_rs();
     assert!(src.contains("location.hostname !== '__HOST__'") && src.contains("u.hostname === '__HOST__'"));
-    assert_eq!(src.matches(".replace(\"__HOST__\", guard::APP_HOST)").count(), 3, "both scripts on page load and the timer");
+    assert_eq!(src.matches(".replace(\"__HOST__\", guard::APP_HOST)").count(), 4, "both scripts on page load, the timer, and the window coming to the front");
     let guard = fs::read_to_string("src/guard.rs").unwrap();
     let start = fs::read_to_string("src/start.rs").unwrap();
     let h = |t: &str| t.lines().find(|l| l.contains("pub const APP_HOST")).unwrap().split('"').nth(1).unwrap().to_string();
@@ -104,7 +104,7 @@ fn automatic_install_waits_for_a_quiet_moment_and_respects_the_tray_switch() {
 #[test]
 fn the_window_being_in_front_or_downloading_blocks_the_automatic_install() {
     let src = main_rs();
-    assert!(src.contains("WindowEvent::Focused(true) => AWAY_SINCE.store(0,"), "in front resets the clock");
+    assert!(src.contains("WindowEvent::Focused(true) => {\n                        AWAY_SINCE.store(0,"), "in front resets the clock");
     assert!(src.contains("DOWNLOADS.fetch_add(1"), "a requested download is counted");
     assert!(src.contains("DOWNLOADS.load("), "and read by the install rule");
 }
@@ -122,7 +122,7 @@ fn the_updated_to_marker_is_written_before_the_restart_and_shown_once() {
 #[test]
 fn the_unread_number_comes_from_the_messenger_badge_endpoint_total() {
     let src = main_rs();
-    assert!(src.contains("fetch('/messenger/api/badge', {credentials: 'include', headers:"));
+    assert!(src.contains("fetch('/messenger/api/badge', {credentials: 'include', signal: ctl.signal, headers:"));
     assert!(src.contains("parseInt(d.total, 10)"));
     assert!(!src.contains("check-notifications"), "the EvolveApp endpoint is gone from the Messenger shell");
 }
@@ -141,4 +141,18 @@ fn the_unread_poll_never_runs_on_a_sign_in_page_and_asks_for_json_as_an_ajax_cal
     assert!(poll.contains("login|login_check|2fa|forgot|reset|register|logout"), "sign-in pages are skipped");
     assert!(poll.find("login|login_check").unwrap() < poll.find("fetch(").unwrap(), "the skip comes before the request");
     assert!(poll.contains("'X-Requested-With': 'XMLHttpRequest'") && poll.contains("'Accept': 'application/json'"), "the site must treat it as an ajax call, never save it as the post-login page");
+}
+
+#[test]
+fn the_unread_poll_is_every_15_seconds_one_call_at_a_time_and_runs_when_the_window_comes_to_the_front() {
+    let src = main_rs();
+    assert!(src.contains("const UNREAD_POLL_SECS: u64 = 15;"));
+    assert!(src.contains("std::thread::sleep(Duration::from_secs(UNREAD_POLL_SECS));"), "the timer uses the constant");
+    let poll = &src[src.find("const UNREAD_POLL_JS").unwrap()..src.find("const EXTERNAL_LINKS_JS").unwrap()];
+    assert!(poll.contains("window.__evolve_poll_busy") && poll.contains("window.__evolve_poll_busy = false"), "no second call while one is in flight, and the flag is always released");
+    assert!(poll.contains("finally"), "the release is in a finally block");
+    assert!(poll.contains("ctl.abort()") && poll.contains("10000"), "a call that never answers is cut after 10 s");
+    assert!(poll.contains("took * 4"), "a slow answer slows the next calls");
+    let focus = &src[src.find("WindowEvent::Focused(true)").unwrap()..];
+    assert!(focus[..400].contains("UNREAD_POLL_JS"), "coming to the front polls at once");
 }
