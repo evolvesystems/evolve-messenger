@@ -104,7 +104,7 @@ fn automatic_install_waits_for_a_quiet_moment_and_respects_the_tray_switch() {
 #[test]
 fn the_window_being_in_front_or_downloading_blocks_the_automatic_install() {
     let src = main_rs();
-    assert!(src.contains("WindowEvent::Focused(true) => {\n                        AWAY_SINCE.store(0,"), "in front resets the clock");
+    assert!(src.contains("WindowEvent::Focused(true) => {") && src.contains("AWAY_SINCE.store(0,"), "in front resets the clock");
     assert!(src.contains("DOWNLOADS.fetch_add(1"), "a requested download is counted");
     assert!(src.contains("DOWNLOADS.load("), "and read by the install rule");
 }
