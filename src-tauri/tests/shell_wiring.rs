@@ -122,7 +122,7 @@ fn the_updated_to_marker_is_written_before_the_restart_and_shown_once() {
 #[test]
 fn the_unread_number_comes_from_the_messenger_badge_endpoint_total() {
     let src = main_rs();
-    assert!(src.contains("fetch('/messenger/api/badge', {credentials: 'include'})"));
+    assert!(src.contains("fetch('/messenger/api/badge', {credentials: 'include', headers:"));
     assert!(src.contains("parseInt(d.total, 10)"));
     assert!(!src.contains("check-notifications"), "the EvolveApp endpoint is gone from the Messenger shell");
 }
@@ -132,4 +132,13 @@ fn nothing_in_the_shell_reloads_or_navigates_on_a_resize() {
     let src = main_rs();
     assert!(!src.contains("WindowEvent::Resized"), "no resize handler");
     assert!(!src.contains("location.reload") && !src.contains("location.href") && !src.contains("location.replace") && !src.contains(".navigate("), "no scripted navigation or reload anywhere");
+}
+
+#[test]
+fn the_unread_poll_never_runs_on_a_sign_in_page_and_asks_for_json_as_an_ajax_call() {
+    let src = main_rs();
+    let poll = &src[src.find("const UNREAD_POLL_JS").unwrap()..src.find("const EXTERNAL_LINKS_JS").unwrap()];
+    assert!(poll.contains("login|login_check|2fa|forgot|reset|register|logout"), "sign-in pages are skipped");
+    assert!(poll.find("login|login_check").unwrap() < poll.find("fetch(").unwrap(), "the skip comes before the request");
+    assert!(poll.contains("'X-Requested-With': 'XMLHttpRequest'") && poll.contains("'Accept': 'application/json'"), "the site must treat it as an ajax call, never save it as the post-login page");
 }

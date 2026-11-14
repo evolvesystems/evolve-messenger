@@ -223,8 +223,10 @@ async fn install_update(app: tauri::AppHandle) {
 const UNREAD_POLL_JS: &str = r#"
 (async function() {
     if (!window.__TAURI_INTERNALS__ || location.hostname !== '__HOST__') return;
+    // Never from a sign-in page: a signed-out request makes the site save that URL as "where to go after sign-in", and the window then landed on the raw JSON (Maki, 14 Nov).
+    if (/^\/(login|login_check|2fa|forgot|reset|register|logout)([\/?#]|$)/.test(location.pathname)) return;
     try {
-        var r = await fetch('/messenger/api/badge', {credentials: 'include'});
+        var r = await fetch('/messenger/api/badge', {credentials: 'include', headers: {'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest'}});
         if (r.status === 401 || r.status === 403) { window.__TAURI_INTERNALS__.invoke('report_signed_out'); return; }
         if (r.ok) {
             var d = await r.json();
