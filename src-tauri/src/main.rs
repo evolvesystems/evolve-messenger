@@ -256,6 +256,9 @@ const UNREAD_POLL_JS: &str = r#"
 /// The live unread number (EVO-BUG-20296): a push stream from the site, the poll stays as the backstop. Its own file so the logic is tested under node.
 const LIVE_UNREAD_JS: &str = include_str!("live_unread.js");
 
+/// A "Back to chat" bar on the few site pages (Profile, Notification settings) that open in this window but are not the chat.
+const BACK_TO_CHAT_JS: &str = include_str!("back_to_chat.js");
+
 /// Run once per page load inside the messenger page: links to other sites and target=_blank links open in the system browser.
 const EXTERNAL_LINKS_JS: &str = r#"
 (function() {
@@ -341,6 +344,7 @@ fn main() {
                             let _ = webview.eval(&EXTERNAL_LINKS_JS.replace("__HOST__", guard::APP_HOST).replace("__PATHS__", &guard::IN_WINDOW.join("|")));
                             let _ = webview.eval(&UNREAD_POLL_JS.replace("__HOST__", guard::APP_HOST));
                             let _ = webview.eval(&LIVE_UNREAD_JS.replace("__HOST__", guard::APP_HOST));
+                            let _ = webview.eval(&BACK_TO_CHAT_JS.replace("__HOST__", guard::APP_HOST));
                         }
                     }
                 })
