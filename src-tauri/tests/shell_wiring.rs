@@ -60,6 +60,9 @@ fn back_forward_and_home_move_around_the_window_and_the_tray_has_home() {
     assert!(links.contains("e.key === 'Home'") && links.contains("location.assign('__START__')"), "Alt+Home goes to the chat");
     assert!(src.contains(".replace(\"__START__\", start::START_PATH)"), "Home is the one start path from start.rs");
     assert!(src.contains("\"home\" => {") && src.contains("MenuItem::with_id(app, \"home\", \"Home (chat)\", true, None::<&str>)?"), "the tray has Home");
+    assert!(src.contains("fn go_home(app: &tauri::AppHandle)") && src.contains("w.navigate(u)"), "Home navigates the webview itself");
+    assert!(src.contains("show_window(app);\n                        go_home(app);"), "the tray Home calls go_home, not a page script");
+    assert!(!src.contains("location.assign('{}')"), "no page-script navigation for the tray");
     assert!(src.contains("&[&m_open, &m_home, &m_login,"));
 }
 
@@ -67,7 +70,12 @@ fn back_forward_and_home_move_around_the_window_and_the_tray_has_home() {
 fn the_window_is_desktop_sized_stays_on_its_host_and_saves_downloads_safely() {
     let src = main_rs();
     assert!(src.contains(".inner_size(1100.0, 760.0)") && src.contains(".min_inner_size(1024.0, 600.0)"), "the two-column layout starts at 900 px, the window never gets narrower than 1024");
-    assert!(src.contains(".on_navigation(|url| guard::is_navigation_allowed(url.scheme(), url.host_str(), url.username(), url.password(), url.port()))"));
+    assert!(src.contains(".on_navigation({") && src.contains("guard::is_navigation_allowed(url.scheme(), url.host_str(), url.username(), url.password(), url.port())"), "every navigation hop is checked with the user name, password and port");
+    assert!(src.contains("guard::refused_action(url.host_str(), url.as_str())") && src.contains("guard::Refusal::OpenInBrowser =>") && src.contains("guard::Refusal::GoHome => go_home(&h2)"), "a refused hop opens the browser or goes home, never a blank window");
+    let flat: String = src.chars().filter(|c| !c.is_whitespace()).collect();
+    assert!(flat.contains("guard::Refusal::OpenInBrowser=>{usetauri_plugin_shell::ShellExt;let_=h2.shell().open(target,None);}"), "a refused hop to another site really opens the system browser");
+    assert!(flat.contains("guard::Refusal::Nothing=>{}});false}})"), "the refused navigation itself is cancelled (the closure returns false after handling it)");
+    assert!(src.contains(".on_new_window({") && src.contains("tauri::webview::NewWindowResponse::Deny") && src.contains("guard::is_openable_external(url.as_str())"), "window.open, middle click and target=_blank go to the system browser");
     let d = src.find(".on_download(").expect("download handler");
     let body = &src[d..d + 900];
     assert!(body.contains("guard::safe_file_name("), "the name is made safe");
@@ -149,7 +157,12 @@ fn the_unread_number_comes_from_the_messenger_badge_endpoint_total() {
 fn nothing_in_the_shell_reloads_or_navigates_on_a_resize() {
     let src = main_rs();
     assert!(!src.contains("WindowEvent::Resized"), "no resize handler");
-    assert!(!src.contains("location.reload") && !src.contains("location.href") && !src.contains("location.replace") && !src.contains(".navigate("), "no scripted navigation or reload anywhere");
+    assert!(!src.contains("location.reload") && !src.contains("location.href") && !src.contains("location.replace"), "no scripted reload anywhere");
+    // 1.0.8: the ONE explicit navigation is go_home (tray Home, a refused address on our own host), never from a resize or a timer.
+    assert_eq!(src.matches(".navigate(").count(), 1, "exactly one navigate call");
+    let g = src.find("fn go_home(").expect("go_home");
+    let end = g + src[g..].find("\n}\n").unwrap();
+    assert!(src[g..end].contains(".navigate("), "and it is inside go_home");
 }
 
 #[test]

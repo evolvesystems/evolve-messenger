@@ -19,6 +19,25 @@ pub fn is_navigation_allowed(scheme: &str, host: Option<&str>, username: &str, p
     is_same_site(scheme, host, username, password, port) || (scheme == "about" && host.is_none())
 }
 
+/// What to do with a navigation that `is_navigation_allowed` refused (1.0.8, Auditor minor 5): another site's http(s) address (a connect or SSO redirect) opens in the system browser instead of dead-ending;
+/// a refused address on the app host itself (a stray port or user name after a redirect) takes the window back to its start page instead of leaving it blank; anything else is simply refused.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Refusal {
+    OpenInBrowser,
+    GoHome,
+    Nothing,
+}
+
+pub fn refused_action(host: Option<&str>, full_url: &str) -> Refusal {
+    if host == Some(APP_HOST) {
+        Refusal::GoHome
+    } else if is_openable_external(full_url) {
+        Refusal::OpenInBrowser
+    } else {
+        Refusal::Nothing
+    }
+}
+
 /// A download's file name made safe for the Downloads folder: no path parts, no control or reserved characters, never empty, at most 120 characters.
 pub fn safe_file_name(raw: &str) -> String {
     let base = raw.rsplit(['/', '\\']).next().unwrap_or("");
@@ -115,6 +134,18 @@ mod tests {
         assert!(is_same_site("https", Some("evolvepreneuriq.app"), "", None, Some(443)));
         for port in [80u16, 8443, 8080, 444, 1] {
             assert!(!is_same_site("https", Some("evolvepreneuriq.app"), "", None, Some(port)), "{port}");
+        }
+    }
+
+    #[test]
+    fn a_refused_navigation_goes_to_the_browser_goes_home_or_is_dropped() {
+        assert_eq!(refused_action(Some("accounts.example.com"), "https://accounts.example.com/oauth?x=1"), Refusal::OpenInBrowser);
+        assert_eq!(refused_action(Some("example.com"), "http://example.com/"), Refusal::OpenInBrowser);
+        assert_eq!(refused_action(None, "mailto:a@b.test"), Refusal::OpenInBrowser);
+        assert_eq!(refused_action(Some("evolvepreneuriq.app"), "https://evolvepreneuriq.app:8443/login"), Refusal::GoHome);
+        assert_eq!(refused_action(Some("evolvepreneuriq.app"), "https://u:p@evolvepreneuriq.app/"), Refusal::GoHome);
+        for bad in ["javascript:alert(1)", "file:///etc/passwd", "data:text/html,x", "ftp://x/y", "evolve://x"] {
+            assert_eq!(refused_action(None, bad), Refusal::Nothing, "{bad}");
         }
     }
 

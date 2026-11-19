@@ -127,6 +127,15 @@ async fn open_external_url(app: tauri::AppHandle, webview: tauri::Webview, url: 
     app.shell().open(&url, None).map_err(|e| e.to_string())
 }
 
+/// Back to the window's start page (tray Home; a refused address on our own host). Navigates the webview itself, not a page script (Auditor minor 4).
+fn go_home(app: &tauri::AppHandle) {
+    if let Some(w) = app.get_webview_window(WINDOW) {
+        if let Ok(u) = tauri::Url::parse(&start::start_url()) {
+            let _ = w.navigate(u);
+        }
+    }
+}
+
 fn show_window(app: &tauri::AppHandle) {
     if let Some(w) = app.get_webview_window(WINDOW) {
         let _ = w.show();
@@ -290,7 +299,38 @@ fn main() {
                 .title("Evolve Messenger")
                 .inner_size(1100.0, 760.0)
                 .min_inner_size(1024.0, 600.0)
-                .on_navigation(|url| guard::is_navigation_allowed(url.scheme(), url.host_str(), url.username(), url.password(), url.port()))
+                .on_navigation({
+                    let h = app.handle().clone();
+                    move |url| {
+                        if guard::is_navigation_allowed(url.scheme(), url.host_str(), url.username(), url.password(), url.port()) {
+                            return true;
+                        }
+                        // Refused: another site's page opens in the system browser, a refused address on our own host goes home (never a blank window). Off the webview thread, so it cannot deadlock.
+                        let action = guard::refused_action(url.host_str(), url.as_str());
+                        let target = url.to_string();
+                        let h2 = h.clone();
+                        std::thread::spawn(move || match action {
+                            guard::Refusal::OpenInBrowser => {
+                                use tauri_plugin_shell::ShellExt;
+                                let _ = h2.shell().open(target, None);
+                            }
+                            guard::Refusal::GoHome => go_home(&h2),
+                            guard::Refusal::Nothing => {}
+                        });
+                        false
+                    }
+                })
+                // window.open, a middle or ctrl click, a form with target=_blank: an http(s) or mailto address opens in the system browser, any other new window is refused (Auditor minor 2).
+                .on_new_window({
+                    let h = app.handle().clone();
+                    move |url, _features| {
+                        if guard::is_openable_external(url.as_str()) {
+                            use tauri_plugin_shell::ShellExt;
+                            let _ = h.shell().open(url.to_string(), None);
+                        }
+                        tauri::webview::NewWindowResponse::Deny
+                    }
+                })
                 .on_download(|webview, event| match event {
                     // Attachments go straight to the Downloads folder under a safe name (the desktop chat page offers file downloads).
                     tauri::webview::DownloadEvent::Requested { destination, .. } => {
@@ -375,9 +415,7 @@ fn main() {
                     "open" => show_window(app),
                     "home" => {
                         show_window(app);
-                        if let Some(w) = app.get_webview_window(WINDOW) {
-                            let _ = w.eval(&format!("location.assign('{}')", start::START_PATH));
-                        }
+                        go_home(app);
                     }
                     "launch_at_login" => {
                         let al = app.autolaunch();
