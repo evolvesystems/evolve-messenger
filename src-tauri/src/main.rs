@@ -259,28 +259,8 @@ const LIVE_UNREAD_JS: &str = include_str!("live_unread.js");
 /// A "Back to chat" bar on the few site pages (Profile, Notification settings) that open in this window but are not the chat.
 const BACK_TO_CHAT_JS: &str = include_str!("back_to_chat.js");
 
-/// Run once per page load inside the messenger page: links to other sites and target=_blank links open in the system browser.
-const EXTERNAL_LINKS_JS: &str = r#"
-(function() {
-    if (window.__evolve_messenger_links__) return;
-    window.__evolve_messenger_links__ = true;
-    document.addEventListener('click', function(e) {
-        var el = e.target;
-        while (el && el.tagName !== 'A') el = el.parentElement;
-        if (!el || !el.href) return;
-        try {
-            var u = new URL(el.href);
-            var internal = u.hostname === '__HOST__' && /^\/(__PATHS__)([\/?#]|$)/.test(u.pathname);
-            if (!internal || el.target === '_blank') {
-                if (u.protocol === 'https:' || u.protocol === 'http:' || u.protocol === 'mailto:') {
-                    e.preventDefault();
-                    window.__TAURI_INTERNALS__.invoke('open_external_url', {url: el.href});
-                }
-            }
-        } catch (_) {}
-    }, true);
-})();
-"#;
+/// Run once per page load inside the messenger page (1.0.8): the same-site rule for links, and the back / forward / Home keys. Its own file so the logic is tested under node.
+const EXTERNAL_LINKS_JS: &str = include_str!("links.js");
 
 fn main() {
     tauri::Builder::default()
@@ -310,7 +290,7 @@ fn main() {
                 .title("Evolve Messenger")
                 .inner_size(1100.0, 760.0)
                 .min_inner_size(1024.0, 600.0)
-                .on_navigation(|url| guard::is_navigation_allowed(url.scheme(), url.host_str()))
+                .on_navigation(|url| guard::is_navigation_allowed(url.scheme(), url.host_str(), url.username(), url.password(), url.port()))
                 .on_download(|webview, event| match event {
                     // Attachments go straight to the Downloads folder under a safe name (the desktop chat page offers file downloads).
                     tauri::webview::DownloadEvent::Requested { destination, .. } => {
@@ -341,7 +321,7 @@ fn main() {
                     if let PageLoadEvent::Finished = payload.event() {
                         diag::crumb(&format!("page-load finished {}{}", u.host_str().unwrap_or("?"), u.path()));
                         if guard::is_app_url(u.scheme(), u.host_str()) {
-                            let _ = webview.eval(&EXTERNAL_LINKS_JS.replace("__HOST__", guard::APP_HOST).replace("__PATHS__", &guard::IN_WINDOW.join("|")));
+                            let _ = webview.eval(&EXTERNAL_LINKS_JS.replace("__HOST__", guard::APP_HOST).replace("__START__", start::START_PATH));
                             let _ = webview.eval(&UNREAD_POLL_JS.replace("__HOST__", guard::APP_HOST));
                             let _ = webview.eval(&LIVE_UNREAD_JS.replace("__HOST__", guard::APP_HOST));
                             let _ = webview.eval(&BACK_TO_CHAT_JS.replace("__HOST__", guard::APP_HOST));
@@ -375,6 +355,7 @@ fn main() {
             // Tray
             let launch_at_login = app.autolaunch().is_enabled().unwrap_or(false);
             let m_open = MenuItem::with_id(app, "open", "Open Evolve Messenger", true, None::<&str>)?;
+            let m_home = MenuItem::with_id(app, "home", "Home (chat)", true, None::<&str>)?;
             let m_login = CheckMenuItem::with_id(app, "launch_at_login", "Launch at login", true, launch_at_login, None::<&str>)?;
             let m_auto = CheckMenuItem::with_id(app, "auto_install", "Install updates automatically", true, auto_install_on(&app.handle().clone()), None::<&str>)?;
             let m_check = MenuItem::with_id(app, "check_updates", "Check for updates", true, None::<&str>)?;
@@ -383,7 +364,7 @@ fn main() {
             let m_quit = MenuItem::with_id(app, "quit", "Quit Evolve Messenger", true, None::<&str>)?;
             let sep1 = PredefinedMenuItem::separator(app)?;
             let sep2 = PredefinedMenuItem::separator(app)?;
-            let menu = Menu::with_items(app, &[&m_open, &m_login, &m_auto, &sep1, &m_check, &m_install, &m_logs, &sep2, &m_quit])?;
+            let menu = Menu::with_items(app, &[&m_open, &m_home, &m_login, &m_auto, &sep1, &m_check, &m_install, &m_logs, &sep2, &m_quit])?;
             app.manage(InstallItem(m_install.clone()));
 
             TrayIconBuilder::with_id("main")
@@ -392,6 +373,12 @@ fn main() {
                 .tooltip("Evolve Messenger")
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "open" => show_window(app),
+                    "home" => {
+                        show_window(app);
+                        if let Some(w) = app.get_webview_window(WINDOW) {
+                            let _ = w.eval(&format!("location.assign('{}')", start::START_PATH));
+                        }
+                    }
                     "launch_at_login" => {
                         let al = app.autolaunch();
                         let result = if al.is_enabled().unwrap_or(false) { al.disable() } else { al.enable() };

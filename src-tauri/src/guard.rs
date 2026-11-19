@@ -7,18 +7,16 @@ pub fn is_app_url(scheme: &str, host: Option<&str>) -> bool {
     scheme == "https" && host == Some(APP_HOST)
 }
 
-/// Pages of the app host that belong in THIS window: the chat and the sign-in pages. Any other page of the site (a contact, an invoice, the dashboard) opens in the system browser instead,
-/// so the chat window never turns into the whole EIQ app.
-pub const IN_WINDOW: [&str; 12] = ["chat", "login", "2fa", "logout", "forgot", "reset", "register", "profile", "notifications", "projects", "tasks", "integrations"];
-
-pub fn is_in_window_path(path: &str) -> bool {
-    let first = path.trim_start_matches('/').split(['/', '?', '#']).next().unwrap_or("");
-    IN_WINDOW.contains(&first)
+/// A same-site page (1.0.8, EVO-BUG-20300): https, EXACTLY the app host, no user name or password in the address, and the default port. Parsed pieces only, never a prefix or suffix match on a string
+/// (`evolvepreneuriq.app.evil.com`, `evil-evolvepreneuriq.app` and `https://evolvepreneuriq.app@evil.com/` are all NOT same-site). Every path of the app host stays in the window; EXTERNAL_LINKS_JS applies the
+/// same rule to a clicked link (the cases are shared with tests/links_harness.mjs).
+pub fn is_same_site(scheme: &str, host: Option<&str>, username: &str, password: Option<&str>, port: Option<u16>) -> bool {
+    is_app_url(scheme, host) && username.is_empty() && password.is_none() && matches!(port, None | Some(443))
 }
 
-/// Top-level navigations the window may make: the app host over https (and about:blank). Everything else is refused; links to other sites go to the system browser.
-pub fn is_navigation_allowed(scheme: &str, host: Option<&str>) -> bool {
-    is_app_url(scheme, host) || (scheme == "about" && host.is_none())
+/// Top-level navigations the window may make: a same-site page (every redirect hop is checked, so a hop to another host is refused) and about:blank. Everything else is refused; links to other sites go to the system browser.
+pub fn is_navigation_allowed(scheme: &str, host: Option<&str>, username: &str, password: Option<&str>, port: Option<u16>) -> bool {
+    is_same_site(scheme, host, username, password, port) || (scheme == "about" && host.is_none())
 }
 
 /// A download's file name made safe for the Downloads folder: no path parts, no control or reserved characters, never empty, at most 120 characters.
@@ -72,10 +70,51 @@ mod tests {
 
     #[test]
     fn the_window_may_only_navigate_within_the_app_host() {
-        assert!(is_navigation_allowed("https", Some("evolvepreneuriq.app")));
-        assert!(is_navigation_allowed("about", None));
+        assert!(is_navigation_allowed("https", Some("evolvepreneuriq.app"), "", None, None));
+        assert!(is_navigation_allowed("about", None, "", None, None));
         for (s, h) in [("https", Some("example.com")), ("http", Some("evolvepreneuriq.app")), ("file", None), ("javascript", None), ("data", None)] {
-            assert!(!is_navigation_allowed(s, h), "{s} {h:?}");
+            assert!(!is_navigation_allowed(s, h, "", None, None), "{s} {h:?}");
+        }
+    }
+
+    #[test]
+    fn a_redirect_hop_to_another_host_is_refused_even_when_the_first_url_was_fine() {
+        // Tauri asks once per hop: the first URL is the app, the next is not.
+        let hops = [("https", Some("evolvepreneuriq.app")), ("https", Some("evil.example"))];
+        let allowed: Vec<bool> = hops.iter().map(|(s, h)| is_navigation_allowed(s, *h, "", None, None)).collect();
+        assert_eq!(allowed, vec![true, false]);
+    }
+
+    #[test]
+    fn lookalike_hosts_are_not_same_site() {
+        for h in ["evolvepreneuriq.app.evil.com", "evil-evolvepreneuriq.app", "xevolvepreneuriq.app", "evolvepreneuriq.app.", "EVOLVEPRENEURIQ.APP", "messager.evolvepreneuriq.app", "evolvepreneuriq.com"] {
+            assert!(!is_same_site("https", Some(h), "", None, None), "{h}");
+        }
+        assert!(is_same_site("https", Some("evolvepreneuriq.app"), "", None, None));
+    }
+
+    #[test]
+    fn an_address_with_a_user_name_or_password_is_not_same_site() {
+        // https://evolvepreneuriq.app@evil.com/ parses to host evil.com; https://evil.com@evolvepreneuriq.app/ to host evolvepreneuriq.app WITH a user name: both refused.
+        assert!(!is_same_site("https", Some("evil.com"), "evolvepreneuriq.app", None, None));
+        assert!(!is_same_site("https", Some("evolvepreneuriq.app"), "evil.com", None, None));
+        assert!(!is_same_site("https", Some("evolvepreneuriq.app"), "", Some("secret"), None));
+        assert!(!is_navigation_allowed("https", Some("evolvepreneuriq.app"), "evil.com", None, None));
+    }
+
+    #[test]
+    fn only_http_s_is_same_site() {
+        for s in ["http", "mailto", "ftp", "file", "javascript", "data", "about", "evolve"] {
+            assert!(!is_same_site(s, Some("evolvepreneuriq.app"), "", None, None), "{s}");
+        }
+    }
+
+    #[test]
+    fn only_the_default_port_is_same_site() {
+        assert!(is_same_site("https", Some("evolvepreneuriq.app"), "", None, None));
+        assert!(is_same_site("https", Some("evolvepreneuriq.app"), "", None, Some(443)));
+        for port in [80u16, 8443, 8080, 444, 1] {
+            assert!(!is_same_site("https", Some("evolvepreneuriq.app"), "", None, Some(port)), "{port}");
         }
     }
 
@@ -89,15 +128,5 @@ mod tests {
         assert_eq!(safe_file_name("..."), "download");
         assert_eq!(safe_file_name("   "), "download");
         assert_eq!(safe_file_name(&"x".repeat(300)).len(), 120);
-    }
-
-    #[test]
-    fn only_the_chat_and_sign_in_pages_stay_in_the_window() {
-        for p in ["/chat", "/chat/desktop", "/chat?embed=1", "/chat/channel/5", "/login", "/login/", "/2fa/check", "/logout", "/forgot", "/reset/abc", "/register", "/profile", "/profile/edit", "/notifications/preferences", "/projects", "/projects/12", "/tasks", "/tasks/?filter=mine", "/integrations/library"] {
-            assert!(is_in_window_path(p), "{p}");
-        }
-        for p in ["/", "/crm/contacts/5", "/dashboard", "/chatter", "/loginfo", "/admin/chat", "/profiles", "/notificationsx", "/projectsx", "/project", "/taskset", "/integration", "/crm-marketing/contacts", "/bugs", "/evolve-docs", "/api/v1/desktop/check-notifications", ""] {
-            assert!(!is_in_window_path(p), "{p}");
-        }
     }
 }

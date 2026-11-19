@@ -23,7 +23,8 @@ fn the_app_opens_the_desktop_team_chat_page_on_the_main_host() {
 #[test]
 fn the_host_in_the_page_scripts_comes_from_the_one_constant() {
     let src = main_rs();
-    assert!(src.contains("location.hostname !== '__HOST__'") && src.contains("u.hostname === '__HOST__'"));
+    let links = fs::read_to_string("src/links.js").unwrap();
+    assert!(src.contains("location.hostname !== '__HOST__'") && links.contains("u.hostname === '__HOST__'"));
     assert_eq!(src.matches(".replace(\"__HOST__\", guard::APP_HOST)").count(), 6, "scripts on page load (unread, live stream, back bar), the timer, and the window coming to the front");
     let guard = fs::read_to_string("src/guard.rs").unwrap();
     let start = fs::read_to_string("src/start.rs").unwrap();
@@ -39,17 +40,34 @@ fn the_window_user_agent_is_a_browser_string_with_the_app_suffix() {
 }
 
 #[test]
-fn links_to_other_pages_of_the_site_open_in_the_system_browser_not_in_the_chat_window() {
+fn every_page_of_the_site_stays_in_the_window_and_other_sites_open_in_the_system_browser() {
     let src = main_rs();
-    assert!(src.contains("var internal = u.hostname === '__HOST__' && /^\\/(__PATHS__)([\\/?#]|$)/.test(u.pathname);"));
-    assert!(src.contains(".replace(\"__PATHS__\", &guard::IN_WINDOW.join(\"|\"))"), "the allowed first path parts come from guard.rs, one list");
+    let links = fs::read_to_string("src/links.js").unwrap();
+    assert!(src.contains("const EXTERNAL_LINKS_JS: &str = include_str!(\"links.js\");"), "the link script is its own file, run by the node harness");
+    assert!(links.contains("return u.protocol === 'https:' && u.hostname === '__HOST__' && !u.username && !u.password && (u.port === '' || u.port === '443');"), "the same-site rule: https, exact host, no userinfo, default port");
+    assert!(links.contains("if (!sameSite(u) || el.target === '_blank') {"), "anything not same-site, and target=_blank, goes to the system browser");
+    assert!(!src.contains("IN_WINDOW") && !src.contains("__PATHS__") && !links.contains("__PATHS__"), "no first-path-word list any more");
+    assert!(!fs::read_to_string("src/guard.rs").unwrap().contains("is_in_window_path"));
+}
+
+#[test]
+fn back_forward_and_home_move_around_the_window_and_the_tray_has_home() {
+    let src = main_rs();
+    let links = fs::read_to_string("src/links.js").unwrap();
+    assert!(links.contains("e.key === 'ArrowLeft'") && links.contains("history.back();"), "Alt+Left goes back");
+    assert!(links.contains("e.key === 'ArrowRight'") && links.contains("history.forward();"));
+    assert!(links.contains("e.button === 3") && links.contains("e.button === 4"), "mouse back and forward buttons");
+    assert!(links.contains("e.key === 'Home'") && links.contains("location.assign('__START__')"), "Alt+Home goes to the chat");
+    assert!(src.contains(".replace(\"__START__\", start::START_PATH)"), "Home is the one start path from start.rs");
+    assert!(src.contains("\"home\" => {") && src.contains("MenuItem::with_id(app, \"home\", \"Home (chat)\", true, None::<&str>)?"), "the tray has Home");
+    assert!(src.contains("&[&m_open, &m_home, &m_login,"));
 }
 
 #[test]
 fn the_window_is_desktop_sized_stays_on_its_host_and_saves_downloads_safely() {
     let src = main_rs();
     assert!(src.contains(".inner_size(1100.0, 760.0)") && src.contains(".min_inner_size(1024.0, 600.0)"), "the two-column layout starts at 900 px, the window never gets narrower than 1024");
-    assert!(src.contains(".on_navigation(|url| guard::is_navigation_allowed(url.scheme(), url.host_str()))"));
+    assert!(src.contains(".on_navigation(|url| guard::is_navigation_allowed(url.scheme(), url.host_str(), url.username(), url.password(), url.port()))"));
     let d = src.find(".on_download(").expect("download handler");
     let body = &src[d..d + 900];
     assert!(body.contains("guard::safe_file_name("), "the name is made safe");
@@ -177,8 +195,21 @@ fn profile_and_notification_pages_stay_in_the_window_with_a_back_to_chat_bar() {
     assert!(src.contains("const BACK_TO_CHAT_JS: &str = include_str!(\"back_to_chat.js\");"));
     assert!(src.contains("webview.eval(&BACK_TO_CHAT_JS.replace(\"__HOST__\", guard::APP_HOST))"), "added on every app page load");
     let guard = fs::read_to_string("src/guard.rs").unwrap();
-    assert!(guard.contains("\"profile\", \"notifications\", \"projects\", \"tasks\", \"integrations\"]"), "the settings, Projects, Tasks and Integrations pages are in the window list");
+    assert!(guard.contains("pub fn is_same_site("), "every page of the site, Profile and Notification settings included, is in the window (1.0.8)");
     let js = fs::read_to_string("src/back_to_chat.js").unwrap();
     assert!(js.contains("bar.href = '/chat/desktop';"), "the bar leads back to the desktop chat page");
     assert!(fs::metadata("tests/back_to_chat_harness.mjs").is_ok(), "the node harness for the script ships with it");
+}
+
+#[test]
+fn the_node_harnesses_for_the_page_scripts_pass() {
+    // links.js (same-site rule, back / forward / Home) and back_to_chat.js run in a fake page under node; skipped where node is not installed.
+    if std::process::Command::new("node").arg("--version").output().is_err() {
+        return;
+    }
+    for (harness, script) in [("tests/links_harness.mjs", "src/links.js"), ("tests/back_to_chat_harness.mjs", "src/back_to_chat.js")] {
+        let out = std::process::Command::new("node").arg(harness).arg(script).output().expect("node runs");
+        assert!(out.status.success(), "{harness}: {}", String::from_utf8_lossy(&out.stdout));
+    }
+    assert!(fs::metadata("tests/links_harness.mjs").is_ok());
 }
