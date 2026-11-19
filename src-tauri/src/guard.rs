@@ -9,7 +9,7 @@ pub fn is_app_url(scheme: &str, host: Option<&str>) -> bool {
 
 /// Pages of the app host that belong in THIS window: the chat and the sign-in pages. Any other page of the site (a contact, an invoice, the dashboard) opens in the system browser instead,
 /// so the chat window never turns into the whole EIQ app.
-pub const IN_WINDOW: [&str; 9] = ["chat", "login", "2fa", "logout", "forgot", "reset", "register", "profile", "notifications"];
+pub const IN_WINDOW: [&str; 12] = ["chat", "login", "2fa", "logout", "forgot", "reset", "register", "profile", "notifications", "projects", "tasks", "integrations"];
 
 pub fn is_in_window_path(path: &str) -> bool {
     let first = path.trim_start_matches('/').split(['/', '?', '#']).next().unwrap_or("");
@@ -93,10 +93,10 @@ mod tests {
 
     #[test]
     fn only_the_chat_and_sign_in_pages_stay_in_the_window() {
-        for p in ["/chat", "/chat/desktop", "/chat?embed=1", "/chat/channel/5", "/login", "/login/", "/2fa/check", "/logout", "/forgot", "/reset/abc", "/register", "/profile", "/profile/edit", "/notifications/preferences"] {
+        for p in ["/chat", "/chat/desktop", "/chat?embed=1", "/chat/channel/5", "/login", "/login/", "/2fa/check", "/logout", "/forgot", "/reset/abc", "/register", "/profile", "/profile/edit", "/notifications/preferences", "/projects", "/projects/12", "/tasks", "/tasks/?filter=mine", "/integrations/library"] {
             assert!(is_in_window_path(p), "{p}");
         }
-        for p in ["/", "/crm/contacts/5", "/dashboard", "/chatter", "/loginfo", "/admin/chat", "/profiles", "/notificationsx", "/api/v1/desktop/check-notifications", ""] {
+        for p in ["/", "/crm/contacts/5", "/dashboard", "/chatter", "/loginfo", "/admin/chat", "/profiles", "/notificationsx", "/projectsx", "/project", "/taskset", "/integration", "/crm-marketing/contacts", "/bugs", "/evolve-docs", "/api/v1/desktop/check-notifications", ""] {
             assert!(!is_in_window_path(p), "{p}");
         }
     }

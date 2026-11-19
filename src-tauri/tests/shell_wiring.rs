@@ -177,7 +177,7 @@ fn profile_and_notification_pages_stay_in_the_window_with_a_back_to_chat_bar() {
     assert!(src.contains("const BACK_TO_CHAT_JS: &str = include_str!(\"back_to_chat.js\");"));
     assert!(src.contains("webview.eval(&BACK_TO_CHAT_JS.replace(\"__HOST__\", guard::APP_HOST))"), "added on every app page load");
     let guard = fs::read_to_string("src/guard.rs").unwrap();
-    assert!(guard.contains("\"profile\", \"notifications\"]"), "the two settings pages are in the window list");
+    assert!(guard.contains("\"profile\", \"notifications\", \"projects\", \"tasks\", \"integrations\"]"), "the settings, Projects, Tasks and Integrations pages are in the window list");
     let js = fs::read_to_string("src/back_to_chat.js").unwrap();
     assert!(js.contains("bar.href = '/chat/desktop';"), "the bar leads back to the desktop chat page");
     assert!(fs::metadata("tests/back_to_chat_harness.mjs").is_ok(), "the node harness for the script ships with it");
