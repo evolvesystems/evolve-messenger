@@ -34,4 +34,21 @@ for (const [name,resp] of [['404',{ok:false,status:404}],['401',{ok:false,status
 { const s=setup((u)=>u.includes('live-auth')?key():sse(['data: {"type":"unread","total":1}\n\n'])); run(); await wait(150); assert.equal(globalThis.__evolve_live_ok,false); ok('flag off after the stream ends (poll resumes)'); }
 // 7 started once per page
 { const s=setup((u)=>u.includes('live-auth')?key():sse([],true)); run(); run(); await wait(80); assert.equal(s.calls.filter(c=>c[0].includes('live-auth')).length,1); ok('runs once per page'); }
+// 8 (20541) a badge fetch right after the stream opens picks up what was pushed while no stream was open
+{ const s=setup((u)=>u.includes('live-auth')?key():u.includes('/messenger/api/badge')?{ok:true,status:200,json:async()=>({total:5,areas:{}})}:sse([],true)); run(); await wait(150);
+  assert.deepEqual(s.reported,[['report_unread',{count:5}]]); assert.equal(s.calls.filter(c=>c[0]==='/messenger/api/badge').length,1); ok('catch-up fetch when the stream opens'); }
+// 9 (20541) and again when the stream ends
+{ const s=setup((u)=>u.includes('live-auth')?key():u.includes('/messenger/api/badge')?{ok:true,status:200,json:async()=>({total:2,areas:{}})}:sse([])); run(); await wait(150);
+  assert.equal(s.calls.filter(c=>c[0]==='/messenger/api/badge').length,2,'open and close'); ok('catch-up fetch when the stream ends'); }
+// 10 a failed or odd badge answer reports nothing
+for (const [name,resp] of [['500',{ok:false,status:500}],['no total',{ok:true,status:200,json:async()=>({areas:{}})}],['negative',{ok:true,status:200,json:async()=>({total:-3})}],['bad json',{ok:true,status:200,json:async()=>{throw new Error('x')}}]]) {
+  const s=setup((u)=>u.includes('live-auth')?key():u.includes('/messenger/api/badge')?resp:sse([],true)); run(); await wait(100); assert.deepEqual(s.reported,[]); ok('catch-up ignores '+name); }
+// 11 (20541) a stream that goes silent is dropped by the watchdog (no bytes for the stall time)
+{ globalThis.__evolve_stall_ms=60; const s=setup((u)=>u.includes('live-auth')?key():u.includes('/messenger/api/badge')?{ok:false,status:500}:sse([],true)); run(); await wait(30);
+  assert.equal(globalThis.__evolve_live_ok,true,'open while quiet for less than the stall time'); await wait(120);
+  assert.equal(globalThis.__evolve_live_ok,false,'dropped after the stall time'); const hubCall=s.calls.find(c=>c[0].includes('topic=')); assert.equal(hubCall[1].signal.aborted,true,'the dead connection is aborted, not left open'); ok('stall watchdog drops a silent stream and aborts it'); delete globalThis.__evolve_stall_ms; }
+// 12 any bytes keep the stream alive (a heartbeat comment resets the watchdog)
+{ globalThis.__evolve_stall_ms=80; const enc=new TextEncoder(); const body=new ReadableStream({async start(c){for(let i=0;i<4;i++){c.enqueue(enc.encode(':\n\n'));await new Promise(r=>setTimeout(r,40));}await new Promise(r=>setTimeout(r,500));}});
+  const s=setup((u)=>u.includes('live-auth')?key():u.includes('/messenger/api/badge')?{ok:false,status:500}:{ok:true,status:200,body}); run(); await wait(190);
+  assert.equal(globalThis.__evolve_live_ok,true,'heartbeats every 40 ms keep an 80 ms watchdog quiet'); ok('heartbeats keep the stream alive'); delete globalThis.__evolve_stall_ms; }
 console.log(results.length,'passed'); process.exit(0);

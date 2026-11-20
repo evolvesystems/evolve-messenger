@@ -33,4 +33,5 @@ for (const u of ['javascript:alert(1)', 'file:///etc/passwd', 'ftp://x']) { cons
 const m = page('MacIntel');
 { m.handlers.keydown(ev({ metaKey: true, key: '[' })); assert.equal(m.calls.back, 1); m.handlers.keydown(ev({ metaKey: true, key: ']' })); assert.equal(m.calls.fwd, 1); m.handlers.keydown(ev({ metaKey: true, shiftKey: true, key: 'H' })); assert.deepEqual(m.calls.assigned, ['/chat/desktop']); m.handlers.keydown(ev({ altKey: true, key: 'ArrowLeft' })); assert.equal(m.calls.back, 1, 'Option+Left stays a text shortcut on a Mac'); ok('Mac: Cmd+[ ] and Cmd+Shift+H'); }
 { const again = page('Win32'); const keys = Object.keys(again.handlers).sort().join(','); assert.equal(keys, 'click,keydown,mouseup'); ok('three listeners and one run per page'); }
+{ const q = page('Win32'); q.handlers.keydown(ev({ ctrlKey: true, shiftKey: true, key: 'H' })); assert.deepEqual(q.calls.assigned, ['/chat/desktop']); ok('Ctrl+Shift+H goes to the chat'); }
 console.log(n, 'passed');

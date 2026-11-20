@@ -9,6 +9,19 @@
     window.__evolve_live_ok = false;
     var DEAD = 0;
 
+    var STALL_MS = window.__evolve_stall_ms || 90000; // (a test sets window.__evolve_stall_ms) no bytes at all (the hub sends a heartbeat comment every ~40 s) for this long: the connection is dead, drop it and reconnect
+
+    // EVO-BUG-20541: one plain badge fetch, so a push that was missed while no stream was open (the hub closes a stream about every 9 minutes) is picked up at once, not at the next poll.
+    async function catchUp() {
+        try {
+            var r = await fetch('/messenger/api/badge', {credentials: 'include', headers: {'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest'}});
+            if (!r.ok) return;
+            var d = await r.json();
+            var n = parseInt(d && d.total, 10);
+            if (isFinite(n) && n >= 0) window.__TAURI_INTERNALS__.invoke('report_unread', {count: n});
+        } catch (x) {}
+    }
+
     function sleep(ms) { return new Promise(function(r) { setTimeout(r, ms); }); }
 
     // Parse one SSE chunk stream into events; calls onData(text) for each complete event.
@@ -57,9 +70,13 @@
             });
             if (!resp.ok || !resp.body) return false;
             window.__evolve_live_ok = true;
+            catchUp(); // the stream is open: anything pushed before this moment was not heard
             var dec = new TextDecoder(), parse = makeParser(handle), rd = resp.body.getReader();
             for (;;) {
-                var step = await rd.read();
+                var stall;
+                var step = await Promise.race([rd.read(), new Promise(function(res) { stall = setTimeout(function() { res(null); }, STALL_MS); })]);
+                clearTimeout(stall);
+                if (step === null) { ctl.abort(); return false; } // silent for STALL_MS: dead connection
                 if (step.done) break;
                 parse(dec.decode(step.value, {stream: true}));
             }
@@ -69,6 +86,7 @@
         } finally {
             clearTimeout(timer);
             window.__evolve_live_ok = false;
+            catchUp(); // the stream just ended or was dropped: ask now, the reconnect waits a few seconds
         }
     }
 
