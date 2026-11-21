@@ -3,7 +3,8 @@
 use std::fs;
 
 fn main_rs() -> String {
-    fs::read_to_string("src/main.rs").unwrap()
+    // The Windows checkout has CRLF line endings; several checks below match multi-line text with "\n".
+    fs::read_to_string("src/main.rs").unwrap().replace("\r\n", "\n")
 }
 
 #[test]
