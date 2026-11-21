@@ -71,9 +71,11 @@ fn the_window_is_desktop_sized_stays_on_its_host_and_saves_downloads_safely() {
     let src = main_rs();
     assert!(src.contains(".inner_size(1100.0, 760.0)") && src.contains(".min_inner_size(1024.0, 600.0)"), "the two-column layout starts at 900 px, the window never gets narrower than 1024");
     assert!(src.contains(".on_navigation({") && src.contains("guard::is_navigation_allowed(url.scheme(), url.host_str(), url.username(), url.password(), url.port())"), "every navigation hop is checked with the user name, password and port");
-    assert!(src.contains("guard::refused_action(url.host_str(), url.as_str())") && src.contains("guard::Refusal::OpenInBrowser =>") && src.contains("guard::Refusal::GoHome => go_home(&h2)"), "a refused hop opens the browser or goes home, never a blank window");
+    assert!(src.contains("guard::refused_action(url.host_str())") && src.contains("guard::Refusal::GoHome => go_home(&h2)"), "a refused hop on our host goes home, never a blank window");
     let flat: String = src.chars().filter(|c| !c.is_whitespace()).collect();
-    assert!(flat.contains("guard::Refusal::OpenInBrowser=>{usetauri_plugin_shell::ShellExt;let_=h2.shell().open(target,None);}"), "a refused hop to another site really opens the system browser");
+    let nav_start = src.find(".on_navigation({").expect("on_navigation");
+    let nav_end = src.find(".on_new_window({").expect("on_new_window");
+    assert!(!src[nav_start..nav_end].contains("shell().open") && !src[nav_start..nav_end].contains("OpenInBrowser"), "a refused navigation never opens the system browser on its own: only a person's click may (Auditor minor 1)");
     assert!(flat.contains("guard::Refusal::Nothing=>{}});false}})"), "the refused navigation itself is cancelled (the closure returns false after handling it)");
     assert!(src.contains(".on_new_window({") && src.contains("tauri::webview::NewWindowResponse::Deny") && src.contains("guard::is_openable_external(url.as_str())"), "window.open, middle click and target=_blank go to the system browser");
     let d = src.find(".on_download(").expect("download handler");

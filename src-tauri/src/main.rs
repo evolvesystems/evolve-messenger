@@ -305,15 +305,11 @@ fn main() {
                         if guard::is_navigation_allowed(url.scheme(), url.host_str(), url.username(), url.password(), url.port()) {
                             return true;
                         }
-                        // Refused: another site's page opens in the system browser, a refused address on our own host goes home (never a blank window). Off the webview thread, so it cannot deadlock.
-                        let action = guard::refused_action(url.host_str(), url.as_str());
-                        let target = url.to_string();
+                        // Refused: a refused address on our own host goes home (never a blank window); anything else is dropped. It is NOT opened in the system browser from here: a redirect or a script is not a person's click (Auditor minor 1).
+                        // Off the webview thread, so it cannot deadlock.
+                        let action = guard::refused_action(url.host_str());
                         let h2 = h.clone();
                         std::thread::spawn(move || match action {
-                            guard::Refusal::OpenInBrowser => {
-                                use tauri_plugin_shell::ShellExt;
-                                let _ = h2.shell().open(target, None);
-                            }
                             guard::Refusal::GoHome => go_home(&h2),
                             guard::Refusal::Nothing => {}
                         });

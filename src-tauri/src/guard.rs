@@ -19,20 +19,18 @@ pub fn is_navigation_allowed(scheme: &str, host: Option<&str>, username: &str, p
     is_same_site(scheme, host, username, password, port) || (scheme == "about" && host.is_none())
 }
 
-/// What to do with a navigation that `is_navigation_allowed` refused (1.0.8, Auditor minor 5): another site's http(s) address (a connect or SSO redirect) opens in the system browser instead of dead-ending;
-/// a refused address on the app host itself (a stray port or user name after a redirect) takes the window back to its start page instead of leaving it blank; anything else is simply refused.
+/// What to do with a navigation that `is_navigation_allowed` refused (1.0.8, Auditor minors 5 and 1): a refused address on the app host itself (a stray port or user name after a redirect) takes the window back to
+/// its start page instead of leaving it blank; anything else is simply refused. A refused hop to ANOTHER site is never opened in the system browser from here: a redirect or a script is not a click, and only a
+/// click the person made (handled in links.js, which asks `open_external_url`) may open the browser (Auditor minor 1).
 #[derive(Debug, PartialEq, Eq)]
 pub enum Refusal {
-    OpenInBrowser,
     GoHome,
     Nothing,
 }
 
-pub fn refused_action(host: Option<&str>, full_url: &str) -> Refusal {
+pub fn refused_action(host: Option<&str>) -> Refusal {
     if host == Some(APP_HOST) {
         Refusal::GoHome
-    } else if is_openable_external(full_url) {
-        Refusal::OpenInBrowser
     } else {
         Refusal::Nothing
     }
@@ -53,7 +51,14 @@ pub fn is_openable_external(url: &str) -> bool {
         return false;
     }
     let lower = url.to_ascii_lowercase();
-    lower.starts_with("https://") || lower.starts_with("http://") || lower.starts_with("mailto:")
+    if lower.starts_with("mailto:") {
+        // a mailto may not ask the mail program to attach a file from this computer (Auditor minor 3): any header named attach or attachment, however it is cased or percent-encoded
+        let query = lower.split_once('?').map(|(_, q)| q).unwrap_or("");
+        let decoded = query.replace("%61", "a").replace("%74", "t");
+        let has_attach = |q: &str| q.split(['&', ';']).any(|kv| kv.split('=').next().map(|k| k.trim() == "attach" || k.trim() == "attachment").unwrap_or(false));
+        return !(has_attach(query) || has_attach(&decoded));
+    }
+    lower.starts_with("https://") || lower.starts_with("http://")
 }
 
 #[cfg(test)]
@@ -78,7 +83,7 @@ mod tests {
 
     #[test]
     fn external_links_are_http_https_or_mailto_and_nothing_else() {
-        for ok in ["https://example.com/a?b=c", "http://example.com", "mailto:a@b.test", "HTTPS://EXAMPLE.COM"] {
+        for ok in ["https://example.com/a?b=c", "http://example.com", "mailto:a@b.test", "HTTPS://EXAMPLE.COM", "mailto:a@b.test?subject=Hi&body=attached%20soon"] {
             assert!(is_openable_external(ok), "{}", ok);
         }
         for bad in ["", "javascript:alert(1)", "file:///etc/passwd", "ftp://x", "tel:123", "data:text/html,x", "https://a b", "https://a\nb", "//example.com", "evolve://x"] {
@@ -138,15 +143,21 @@ mod tests {
     }
 
     #[test]
-    fn a_refused_navigation_goes_to_the_browser_goes_home_or_is_dropped() {
-        assert_eq!(refused_action(Some("accounts.example.com"), "https://accounts.example.com/oauth?x=1"), Refusal::OpenInBrowser);
-        assert_eq!(refused_action(Some("example.com"), "http://example.com/"), Refusal::OpenInBrowser);
-        assert_eq!(refused_action(None, "mailto:a@b.test"), Refusal::OpenInBrowser);
-        assert_eq!(refused_action(Some("evolvepreneuriq.app"), "https://evolvepreneuriq.app:8443/login"), Refusal::GoHome);
-        assert_eq!(refused_action(Some("evolvepreneuriq.app"), "https://u:p@evolvepreneuriq.app/"), Refusal::GoHome);
-        for bad in ["javascript:alert(1)", "file:///etc/passwd", "data:text/html,x", "ftp://x/y", "evolve://x"] {
-            assert_eq!(refused_action(None, bad), Refusal::Nothing, "{bad}");
+    fn a_refused_navigation_goes_home_on_our_host_and_is_dropped_everywhere_else() {
+        // another site, a mailto, a script: never opened from a redirect (Auditor minor 1), only dropped
+        assert_eq!(refused_action(Some("accounts.example.com")), Refusal::Nothing);
+        assert_eq!(refused_action(Some("example.com")), Refusal::Nothing);
+        assert_eq!(refused_action(None), Refusal::Nothing);
+        assert_eq!(refused_action(Some("evolvepreneuriq.app")), Refusal::GoHome);
+        assert_eq!(refused_action(Some("evolvepreneuriq.app.evil.com")), Refusal::Nothing);
+    }
+
+    #[test]
+    fn a_mailto_cannot_attach_a_local_file() {
+        for bad in ["mailto:a@b.test?attach=/etc/passwd", "mailto:a@b.test?subject=x&attachment=C:\\x", "MAILTO:a@b.test?ATTACH=/x", "mailto:a@b.test?subject=x;attach=/x", "mailto:a@b.test?%61ttach=/x", "mailto:a@b.test?attAch=/x"] {
+            assert!(!is_openable_external(bad), "{bad}");
         }
+        assert!(is_openable_external("mailto:a@b.test?subject=attach"), "the word in a value is fine");
     }
 
     #[test]
