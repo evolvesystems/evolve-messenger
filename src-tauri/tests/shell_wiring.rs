@@ -75,10 +75,12 @@ fn the_window_is_desktop_sized_stays_on_its_host_and_saves_downloads_safely() {
     assert!(src.contains("guard::refused_action(url.host_str())") && src.contains("guard::Refusal::GoHome => go_home(&h2)"), "a refused hop on our host goes home, never a blank window");
     let flat: String = src.chars().filter(|c| !c.is_whitespace()).collect();
     let nav_start = src.find(".on_navigation({").expect("on_navigation");
-    let nav_end = src.find(".on_new_window({").expect("on_new_window");
+    let nav_end = src.find(".on_new_window(").expect("on_new_window");
     assert!(!src[nav_start..nav_end].contains("shell().open") && !src[nav_start..nav_end].contains("OpenInBrowser"), "a refused navigation never opens the system browser on its own: only a person's click may (Auditor minor 1)");
     assert!(flat.contains("guard::Refusal::Nothing=>{}});false}})"), "the refused navigation itself is cancelled (the closure returns false after handling it)");
-    assert!(src.contains(".on_new_window({") && src.contains("tauri::webview::NewWindowResponse::Deny") && src.contains("guard::is_openable_external(url.as_str())"), "window.open, middle click and target=_blank go to the system browser");
+    assert!(src.contains(".on_new_window(|_url, _features| tauri::webview::NewWindowResponse::Deny)"), "window.open, middle click and target=_blank never make a window");
+    let nw = src.find(".on_new_window(").expect("on_new_window");
+    assert!(!src[nw..nw + 300].contains("shell().open") && !src[nw..nw + 300].contains("is_openable_external"), "a new window never opens the system browser on its own: only a person's click via links.js may (Auditor, 1.0.9)");
     let d = src.find(".on_download(").expect("download handler");
     let body = &src[d..d + 900];
     assert!(body.contains("guard::safe_file_name("), "the name is made safe");

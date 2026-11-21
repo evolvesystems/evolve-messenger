@@ -45,6 +45,23 @@ pub fn safe_file_name(raw: &str) -> String {
     if cleaned.is_empty() { "download".to_string() } else { cleaned }
 }
 
+/// Every %XX in `s` turned into its byte (a lone or malformed % stays as it is); the result is read as UTF-8 with bad bytes replaced.
+fn percent_decode(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%' && i + 2 < b.len() && b[i + 1].is_ascii_hexdigit() && b[i + 2].is_ascii_hexdigit() {
+            out.push(u8::from_str_radix(&s[i + 1..i + 3], 16).unwrap_or(b'%'));
+            i += 3;
+        } else {
+            out.push(b[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 /// Links the page may ask the system browser to open: http, https and mailto only, no whitespace or control characters, at most 2048 characters.
 pub fn is_openable_external(url: &str) -> bool {
     if url.is_empty() || url.len() > 2048 || url.chars().any(|c| c.is_whitespace() || c.is_control()) {
@@ -53,10 +70,18 @@ pub fn is_openable_external(url: &str) -> bool {
     let lower = url.to_ascii_lowercase();
     if lower.starts_with("mailto:") {
         // a mailto may not ask the mail program to attach a file from this computer (Auditor minor 3): any header named attach or attachment, however it is cased or percent-encoded
-        let query = lower.split_once('?').map(|(_, q)| q).unwrap_or("");
-        let decoded = query.replace("%61", "a").replace("%74", "t");
-        let has_attach = |q: &str| q.split(['&', ';']).any(|kv| kv.split('=').next().map(|k| k.trim() == "attach" || k.trim() == "attachment").unwrap_or(false));
-        return !(has_attach(query) || has_attach(&decoded));
+        // the WHOLE query is percent-decoded (every %XX, up to three rounds for a double encoding) before the header names are read, so no spelling of attach slips through
+        let mut query = lower.split_once('?').map(|(_, q)| q.to_string()).unwrap_or_default();
+        for _ in 0..3 {
+            let next = percent_decode(&query);
+            if next == query {
+                break;
+            }
+            query = next;
+        }
+        let query = query.to_ascii_lowercase(); // lowered AFTER decoding: %41 is an A
+        let has_attach = query.split(['&', ';']).any(|kv| kv.split('=').next().map(|k| k.trim() == "attach" || k.trim() == "attachment").unwrap_or(false));
+        return !has_attach;
     }
     lower.starts_with("https://") || lower.starts_with("http://")
 }
@@ -154,10 +179,11 @@ mod tests {
 
     #[test]
     fn a_mailto_cannot_attach_a_local_file() {
-        for bad in ["mailto:a@b.test?attach=/etc/passwd", "mailto:a@b.test?subject=x&attachment=C:\\x", "MAILTO:a@b.test?ATTACH=/x", "mailto:a@b.test?subject=x;attach=/x", "mailto:a@b.test?%61ttach=/x", "mailto:a@b.test?attAch=/x"] {
+        for bad in ["mailto:a@b.test?atta%63h=/x", "mailto:a@b.test?attac%68=/x", "mailto:a@b.test?%41ttach=/x", "mailto:a@b.test?attachm%65nt=/x", "mailto:a@b.test?%61%74%74%61%63%68=/x", "mailto:a@b.test?%2561ttach=/x", "mailto:a@b.test?subject=x&%61ttachment=/x", "mailto:a@b.test?attach=/etc/passwd", "mailto:a@b.test?subject=x&attachment=C:\\x", "MAILTO:a@b.test?ATTACH=/x", "mailto:a@b.test?subject=x;attach=/x", "mailto:a@b.test?%61ttach=/x", "mailto:a@b.test?attAch=/x"] {
             assert!(!is_openable_external(bad), "{bad}");
         }
         assert!(is_openable_external("mailto:a@b.test?subject=attach"), "the word in a value is fine");
+        assert!(is_openable_external("mailto:a@b.test?subject=100%25%20done&body=%"), "a malformed or lone % is harmless");
     }
 
     #[test]

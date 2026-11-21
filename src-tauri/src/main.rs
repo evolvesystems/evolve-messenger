@@ -316,17 +316,9 @@ fn main() {
                         false
                     }
                 })
-                // window.open, a middle or ctrl click, a form with target=_blank: an http(s) or mailto address opens in the system browser, any other new window is refused (Auditor minor 2).
-                .on_new_window({
-                    let h = app.handle().clone();
-                    move |url, _features| {
-                        if guard::is_openable_external(url.as_str()) {
-                            use tauri_plugin_shell::ShellExt;
-                            let _ = h.shell().open(url.to_string(), None);
-                        }
-                        tauri::webview::NewWindowResponse::Deny
-                    }
-                })
+                // window.open, a middle or ctrl click, a form with target=_blank: no new window is ever made and nothing is opened from here, the same rule as on_navigation (Auditor, 1.0.9): only a person's click,
+                // which links.js turns into open_external_url, may open the system browser.
+                .on_new_window(|_url, _features| tauri::webview::NewWindowResponse::Deny)
                 .on_download(|webview, event| match event {
                     // Attachments go straight to the Downloads folder under a safe name (the desktop chat page offers file downloads).
                     tauri::webview::DownloadEvent::Requested { destination, .. } => {
